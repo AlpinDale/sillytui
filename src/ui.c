@@ -977,6 +977,20 @@ void ui_draw_input_multiline(WINDOW *input_win, const char *buffer,
       wattroff(input_win, COLOR_PAIR(COLOR_PAIR_HINT) | A_DIM);
   }
 
+  if (focused && !editing_mode) {
+    if (g_ui_colors)
+      wattron(input_win, COLOR_PAIR(COLOR_PAIR_HINT) | A_DIM);
+#ifdef __APPLE__
+    const char *newline_hint = " ⌥+Enter:newline ";
+#else
+    const char *newline_hint = " Alt+Enter:newline ";
+#endif
+    int hint_len = (int)strlen(newline_hint);
+    mvwaddstr(input_win, h - 1, w - hint_len - 2, newline_hint);
+    if (g_ui_colors)
+      wattroff(input_win, COLOR_PAIR(COLOR_PAIR_HINT) | A_DIM);
+  }
+
   wrefresh(input_win);
 }
 

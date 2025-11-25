@@ -699,6 +699,37 @@ int main(void) {
     }
 
     if (ch == 27) {
+      nodelay(input_win, TRUE);
+      int next_ch = wgetch(input_win);
+      nodelay(input_win, FALSE);
+
+      if (next_ch == '\n' || next_ch == '\r' || next_ch == KEY_ENTER) {
+        if (input_focused && input_len < INPUT_MAX - 1) {
+          memmove(&input_buffer[cursor_pos + 1], &input_buffer[cursor_pos],
+                  input_len - cursor_pos + 1);
+          input_buffer[cursor_pos] = '\n';
+          input_len++;
+          cursor_pos++;
+          int new_height =
+              ui_calc_input_height(input_buffer, getmaxx(input_win));
+          if (new_height != current_input_height) {
+            current_input_height = new_height;
+            ui_layout_windows_with_input(&chat_win, &input_win,
+                                         current_input_height);
+            touchwin(chat_win);
+            ui_draw_chat(chat_win, &history, selected_msg,
+                         get_model_name(&models), user_disp, bot_disp, false);
+          }
+          ui_draw_input_multiline(input_win, input_buffer, cursor_pos,
+                                  input_focused, input_scroll_line, false);
+        }
+        continue;
+      }
+
+      if (next_ch != ERR) {
+        ungetch(next_ch);
+      }
+
       if (in_place_edit.active) {
         in_place_edit.active = false;
         ui_draw_chat_ex(chat_win, &history, selected_msg,
