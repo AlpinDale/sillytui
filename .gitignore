@@ -58,3 +58,4 @@ build/
 third-party/
 .cache/
 compile_commands.json
+.DS_Store
