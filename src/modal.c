@@ -1014,8 +1014,18 @@ ModalResult modal_handle_key(Modal *m, int ch, ModelsFile *mf,
         return MODAL_RESULT_NONE;
       }
       if (m->field_index == 1 || m->field_index == 0) {
-        const char *title =
-            m->fields[0][0] ? m->fields[0] : chat_auto_title(history);
+        const char *title = NULL;
+        static char existing_title[CHAT_TITLE_MAX];
+
+        if (m->fields[0][0]) {
+          title = m->fields[0];
+        } else if (m->current_chat_id[0] &&
+                   chat_get_title_by_id(m->current_chat_id, existing_title,
+                                        sizeof(existing_title))) {
+          title = existing_title;
+        } else {
+          title = chat_auto_title(history);
+        }
 
         char existing_id[CHAT_ID_MAX] = {0};
         bool title_exists =

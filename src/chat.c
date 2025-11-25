@@ -656,3 +656,31 @@ bool chat_find_by_title(const char *title, char *out_id, size_t id_size) {
   closedir(d);
   return found;
 }
+
+bool chat_get_title_by_id(const char *id, char *out_title, size_t title_size) {
+  if (!id || !out_title || title_size == 0)
+    return false;
+
+  const char *dir = get_chats_dir();
+  if (!dir)
+    return false;
+
+  char filepath[768];
+  snprintf(filepath, sizeof(filepath), "%s/%s.json", dir, id);
+
+  char *content = read_file_contents(filepath, NULL);
+  if (!content)
+    return false;
+
+  char *title = find_json_string(content, "title");
+  if (title) {
+    strncpy(out_title, title, title_size - 1);
+    out_title[title_size - 1] = '\0';
+    free(title);
+    free(content);
+    return true;
+  }
+
+  free(content);
+  return false;
+}
