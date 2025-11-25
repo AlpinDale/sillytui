@@ -22,6 +22,7 @@ add_executable(sillytui
     src/character.c
     src/persona.c
     src/macros.c
+    src/sampler.c
 )
 
 target_compile_definitions(sillytui PRIVATE _XOPEN_SOURCE_EXTENDED NCURSES_WIDECHAR=1)

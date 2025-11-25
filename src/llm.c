@@ -706,8 +706,11 @@ static char *build_request_body(const ModelConfig *config,
 
   int tokens_used = count_tokens(config, body);
 
-  int max_tokens = 512;
-  int available_tokens = context_length - tokens_used - max_tokens;
+  int max_tokens_reserve =
+      (context && context->samplers && context->samplers->max_tokens > 0)
+          ? context->samplers->max_tokens
+          : 512;
+  int available_tokens = context_length - tokens_used - max_tokens_reserve;
 
   int post_history_tokens = 0;
   if (context && context->character &&
@@ -809,9 +812,94 @@ static char *build_request_body(const ModelConfig *config,
     }
   }
 
+  pos += snprintf(body + pos, cap - pos, "],\"stream\":true");
+
+  const SamplerSettings *s = context ? context->samplers : NULL;
+  int max_tok = (s && s->max_tokens > 0) ? s->max_tokens : 512;
+  pos += snprintf(body + pos, cap - pos, ",\"max_tokens\":%d", max_tok);
+
+  if (s) {
+    if (s->temperature != 1.0)
+      pos += snprintf(body + pos, cap - pos, ",\"temperature\":%.4g",
+                      s->temperature);
+    if (s->top_p != 1.0)
+      pos += snprintf(body + pos, cap - pos, ",\"top_p\":%.4g", s->top_p);
+    if (s->frequency_penalty != 0.0)
+      pos += snprintf(body + pos, cap - pos, ",\"frequency_penalty\":%.4g",
+                      s->frequency_penalty);
+    if (s->presence_penalty != 0.0)
+      pos += snprintf(body + pos, cap - pos, ",\"presence_penalty\":%.4g",
+                      s->presence_penalty);
+
+    if (config->api_type == API_TYPE_APHRODITE ||
+        config->api_type == API_TYPE_VLLM ||
+        config->api_type == API_TYPE_LLAMACPP ||
+        config->api_type == API_TYPE_KOBOLDCPP ||
+        config->api_type == API_TYPE_TABBY) {
+      if (s->top_k > 0)
+        pos += snprintf(body + pos, cap - pos, ",\"top_k\":%d", s->top_k);
+      if (s->min_p > 0.0)
+        pos += snprintf(body + pos, cap - pos, ",\"min_p\":%.4g", s->min_p);
+      if (s->repetition_penalty != 1.0)
+        pos += snprintf(body + pos, cap - pos, ",\"repetition_penalty\":%.4g",
+                        s->repetition_penalty);
+      if (s->typical_p != 1.0)
+        pos += snprintf(body + pos, cap - pos, ",\"typical_p\":%.4g",
+                        s->typical_p);
+      if (s->tfs != 1.0)
+        pos += snprintf(body + pos, cap - pos, ",\"tfs\":%.4g", s->tfs);
+      if (s->top_a > 0.0)
+        pos += snprintf(body + pos, cap - pos, ",\"top_a\":%.4g", s->top_a);
+      if (s->min_tokens > 0)
+        pos += snprintf(body + pos, cap - pos, ",\"min_tokens\":%d",
+                        s->min_tokens);
+    }
+
+    if (config->api_type == API_TYPE_APHRODITE) {
+      if (s->smoothing_factor > 0.0)
+        pos += snprintf(body + pos, cap - pos, ",\"smoothing_factor\":%.4g",
+                        s->smoothing_factor);
+      if (s->dynatemp_min > 0.0 || s->dynatemp_max > 0.0) {
+        pos += snprintf(body + pos, cap - pos, ",\"dynatemp_min\":%.4g",
+                        s->dynatemp_min);
+        pos += snprintf(body + pos, cap - pos, ",\"dynatemp_max\":%.4g",
+                        s->dynatemp_max);
+        pos += snprintf(body + pos, cap - pos, ",\"dynatemp_exponent\":%.4g",
+                        s->dynatemp_exponent);
+      }
+      if (s->mirostat_mode > 0) {
+        pos += snprintf(body + pos, cap - pos, ",\"mirostat_mode\":%d",
+                        s->mirostat_mode);
+        pos += snprintf(body + pos, cap - pos, ",\"mirostat_tau\":%.4g",
+                        s->mirostat_tau);
+        pos += snprintf(body + pos, cap - pos, ",\"mirostat_eta\":%.4g",
+                        s->mirostat_eta);
+      }
+      if (s->dry_multiplier > 0.0) {
+        pos += snprintf(body + pos, cap - pos, ",\"dry_multiplier\":%.4g",
+                        s->dry_multiplier);
+        pos +=
+            snprintf(body + pos, cap - pos, ",\"dry_base\":%.4g", s->dry_base);
+        pos += snprintf(body + pos, cap - pos, ",\"dry_allowed_length\":%d",
+                        s->dry_allowed_length);
+        pos +=
+            snprintf(body + pos, cap - pos, ",\"dry_range\":%d", s->dry_range);
+      }
+      if (s->xtc_probability > 0.0) {
+        pos += snprintf(body + pos, cap - pos, ",\"xtc_threshold\":%.4g",
+                        s->xtc_threshold);
+        pos += snprintf(body + pos, cap - pos, ",\"xtc_probability\":%.4g",
+                        s->xtc_probability);
+      }
+      if (s->nsigma > 0.0)
+        pos += snprintf(body + pos, cap - pos, ",\"nsigma\":%.4g", s->nsigma);
+      if (s->skew != 0.0)
+        pos += snprintf(body + pos, cap - pos, ",\"skew\":%.4g", s->skew);
+    }
+  }
+
   pos += snprintf(body + pos, cap - pos,
-                  "],\"stream\":true,\"max_tokens\":512,\"stream_options\":{"
-                  "\"include_usage\":true}}");
+                  ",\"stream_options\":{\"include_usage\":true}}");
   return body;
 }
 

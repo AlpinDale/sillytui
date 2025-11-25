@@ -18,12 +18,12 @@ const char *api_type_name(ApiType type) {
 
 ApiType api_type_from_name(const char *name) {
   if (!name || !name[0])
-    return API_TYPE_OPENAI;
+    return API_TYPE_APHRODITE;
   for (int i = 0; i < API_TYPE_COUNT; i++) {
     if (strcasecmp(name, API_TYPE_NAMES[i]) == 0)
       return (ApiType)i;
   }
-  return API_TYPE_OPENAI;
+  return API_TYPE_APHRODITE;
 }
 
 static bool get_config_path(char *buf, size_t bufsize) {

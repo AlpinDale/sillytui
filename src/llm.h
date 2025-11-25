@@ -5,6 +5,7 @@
 #include "config.h"
 #include "history.h"
 #include "persona.h"
+#include "sampler.h"
 #include <stdbool.h>
 #include <stddef.h>
 
@@ -26,6 +27,7 @@ typedef struct {
 typedef struct {
   const CharacterCard *character;
   const Persona *persona;
+  const SamplerSettings *samplers;
 } LLMContext;
 
 void llm_init(void);

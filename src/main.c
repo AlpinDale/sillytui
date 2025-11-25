@@ -18,6 +18,7 @@
 #include "markdown.h"
 #include "modal.h"
 #include "persona.h"
+#include "sampler.h"
 #include "ui.h"
 
 #define INPUT_MAX 4096
@@ -204,6 +205,7 @@ static void do_llm_reply(ChatHistory *history, WINDOW *chat_win,
 static const SlashCommand SLASH_COMMANDS[] = {
     {"model set", "Add a new model configuration"},
     {"model list", "Select from saved models"},
+    {"sampler", "Configure sampler settings"},
     {"chat save", "Save current chat"},
     {"chat load", "Load a saved chat"},
     {"chat new", "Start a new chat"},
@@ -427,6 +429,16 @@ static bool handle_slash_command(const char *input, Modal *modal,
     modal_open_persona_edit(modal, persona);
     return true;
   }
+  if (strcmp(input, "/sampler") == 0) {
+    ModelConfig *model = config_get_active(mf);
+    if (model) {
+      modal_open_sampler_settings(modal, model->api_type);
+    } else {
+      modal_open_message(modal, "No model configured. Use /model set first.",
+                         false);
+    }
+    return true;
+  }
   if (strcmp(input, "/persona info") == 0) {
     char info[512];
     snprintf(info, sizeof(info), "Name: %s\n\nDescription:\n%s",
@@ -436,21 +448,22 @@ static bool handle_slash_command(const char *input, Modal *modal,
   }
   if (strcmp(input, "/help") == 0) {
     modal_open_message(modal,
-                       "/model set - Add a new model\n"
-                       "/model list - Select a model\n"
-                       "/chat save - Save current chat\n"
-                       "/chat load - Load a saved chat\n"
-                       "/chat new - Start new chat\n"
-                       "/char load - Load character\n"
-                       "/char info - Character info\n"
-                       "/char greetings - Greetings\n"
-                       "/persona set - Edit persona\n"
-                       "/clear - Clear chat history\n"
-                       "/quit - Exit\n"
+                       "/model set         - Add a new model\n"
+                       "/model list        - Select a model\n"
+                       "/sampler           - Configure samplers\n"
+                       "/chat save         - Save current chat\n"
+                       "/chat load         - Load a saved chat\n"
+                       "/chat new          - Start new chat\n"
+                       "/char load         - Load character\n"
+                       "/char info         - Character info\n"
+                       "/char greetings    - Select greeting\n"
+                       "/persona set       - Edit persona\n"
+                       "/clear             - Clear chat history\n"
+                       "/quit              - Exit\n"
                        "\n"
                        "Shortcuts:\n"
-                       "Up/Down - Scroll chat\n"
-                       "Esc - Close / Exit",
+                       "Up/Down            - Scroll chat\n"
+                       "Esc                - Close / Exit",
                        false);
     return true;
   }
@@ -490,6 +503,9 @@ int main(void) {
 
   Persona persona;
   persona_load(&persona);
+
+  SamplerSettings current_samplers;
+  sampler_init_defaults(&current_samplers);
 
   CharacterCard character;
   memset(&character, 0, sizeof(character));
@@ -1088,9 +1104,13 @@ int main(void) {
             ui_draw_chat(chat_win, &history, selected_msg,
                          get_model_name(&models), user_disp, bot_disp, false);
           } else {
+            ModelConfig *regen_model = config_get_active(&models);
+            if (regen_model)
+              sampler_load(&current_samplers, regen_model->api_type);
             LLMContext llm_ctx = {.character =
                                       character_loaded ? &character : NULL,
-                                  .persona = &persona};
+                                  .persona = &persona,
+                                  .samplers = &current_samplers};
 
             history_add_swipe(&history, selected_msg, "Bot: *thinking*");
             ui_draw_chat(chat_win, &history, selected_msg,
@@ -1386,8 +1406,12 @@ int main(void) {
       ui_draw_input_multiline(input_win, input_buffer, cursor_pos,
                               input_focused, input_scroll_line, false);
 
+      ModelConfig *active_model = config_get_active(&models);
+      if (active_model)
+        sampler_load(&current_samplers, active_model->api_type);
       LLMContext llm_ctx = {.character = character_loaded ? &character : NULL,
-                            .persona = &persona};
+                            .persona = &persona,
+                            .samplers = &current_samplers};
       do_llm_reply(&history, chat_win, input_win, saved_input, &models,
                    &selected_msg, &llm_ctx, user_disp, bot_disp);
 

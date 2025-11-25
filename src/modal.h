@@ -5,6 +5,7 @@
 #include "chat.h"
 #include "config.h"
 #include "persona.h"
+#include "sampler.h"
 #include <curses.h>
 #include <stdbool.h>
 
@@ -22,7 +23,8 @@ typedef enum {
   MODAL_CHARACTER_INFO,
   MODAL_GREETING_SELECT,
   MODAL_MESSAGE_EDIT,
-  MODAL_MESSAGE_DELETE_CONFIRM
+  MODAL_MESSAGE_DELETE_CONFIRM,
+  MODAL_SAMPLER_SETTINGS
 } ModalType;
 
 typedef struct {
@@ -65,6 +67,13 @@ typedef struct {
 
   const CharacterCard *character;
   size_t greeting_selection;
+
+  SamplerSettings sampler;
+  ApiType sampler_api_type;
+  int sampler_field_index;
+  int sampler_scroll;
+  char sampler_input[32];
+  int sampler_input_cursor;
 } Modal;
 
 typedef enum {
@@ -78,7 +87,8 @@ typedef enum {
   MODAL_RESULT_PERSONA_SAVED,
   MODAL_RESULT_GREETING_SELECTED,
   MODAL_RESULT_MESSAGE_EDITED,
-  MODAL_RESULT_MESSAGE_DELETED
+  MODAL_RESULT_MESSAGE_DELETED,
+  MODAL_RESULT_SAMPLER_SAVED
 } ModalResult;
 
 void modal_init(Modal *m);
@@ -96,6 +106,7 @@ void modal_open_character_info(Modal *m, const CharacterCard *card);
 void modal_open_greeting_select(Modal *m, const CharacterCard *card);
 void modal_open_message_edit(Modal *m, int msg_index, const char *content);
 void modal_open_message_delete(Modal *m, int msg_index);
+void modal_open_sampler_settings(Modal *m, ApiType api_type);
 int modal_get_edit_msg_index(const Modal *m);
 const char *modal_get_edit_content(const Modal *m);
 void modal_close(Modal *m);
