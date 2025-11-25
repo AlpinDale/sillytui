@@ -266,8 +266,7 @@ static bool handle_slash_command(const char *input, Modal *modal,
           chat_id[CHAT_ID_MAX - 1] = '\0';
         }
       } else {
-        strncpy(char_name, args, sizeof(char_name) - 1);
-        char_name[sizeof(char_name) - 1] = '\0';
+        snprintf(char_name, sizeof(char_name), "%s", args);
       }
 
       char loaded_char_path[CHAT_CHAR_PATH_MAX] = {0};
@@ -277,8 +276,7 @@ static bool handle_slash_command(const char *input, Modal *modal,
         loaded = chat_load(history, chat_id, char_name, loaded_char_path,
                            sizeof(loaded_char_path));
         if (loaded) {
-          strncpy(current_chat_id, chat_id, CHAT_ID_MAX - 1);
-          current_chat_id[CHAT_ID_MAX - 1] = '\0';
+          snprintf(current_chat_id, CHAT_ID_MAX, "%s", chat_id);
         }
       } else {
         loaded = chat_load_latest(history, char_name, loaded_char_path,
@@ -293,9 +291,8 @@ static bool handle_slash_command(const char *input, Modal *modal,
           }
           if (character_load(character, loaded_char_path)) {
             *char_loaded = true;
-            strncpy(current_char_path, loaded_char_path,
-                    CHAT_CHAR_PATH_MAX - 1);
-            current_char_path[CHAT_CHAR_PATH_MAX - 1] = '\0';
+            snprintf(current_char_path, CHAT_CHAR_PATH_MAX, "%s",
+                     loaded_char_path);
           } else {
             *char_loaded = false;
             current_char_path[0] = '\0';
@@ -356,12 +353,10 @@ static bool handle_slash_command(const char *input, Modal *modal,
         *char_loaded = true;
         char *config_path = character_copy_to_config(path);
         if (config_path) {
-          strncpy(current_char_path, config_path, CHAT_CHAR_PATH_MAX - 1);
-          current_char_path[CHAT_CHAR_PATH_MAX - 1] = '\0';
+          snprintf(current_char_path, CHAT_CHAR_PATH_MAX, "%s", config_path);
           free(config_path);
         } else {
-          strncpy(current_char_path, path, CHAT_CHAR_PATH_MAX - 1);
-          current_char_path[CHAT_CHAR_PATH_MAX - 1] = '\0';
+          snprintf(current_char_path, CHAT_CHAR_PATH_MAX, "%s", path);
         }
         history_free(history);
         history_init(history);
@@ -384,10 +379,10 @@ static bool handle_slash_command(const char *input, Modal *modal,
         chat_auto_save(history, current_chat_id, CHAT_ID_MAX, current_char_path,
                        character->name);
       } else {
-        char err_msg[512];
+        char err_msg[1024];
         snprintf(
             err_msg, sizeof(err_msg),
-            "Failed to load character card:\n%s\n\nMake sure the file exists "
+            "Failed to load character card:\n%.512s\n\nMake sure the file exists "
             "and is a valid character card (.json or .png with embedded data).",
             path);
         modal_open_message(modal, err_msg, true);
@@ -802,8 +797,8 @@ int main(void) {
                     }
                     if (character_load(&character, loaded_char_path)) {
                       character_loaded = true;
-                      strncpy(current_char_path, loaded_char_path,
-                              CHAT_CHAR_PATH_MAX - 1);
+                      snprintf(current_char_path, CHAT_CHAR_PATH_MAX, "%s",
+                               loaded_char_path);
                     } else {
                       character_loaded = false;
                       current_char_path[0] = '\0';

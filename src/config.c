@@ -40,11 +40,11 @@ static bool get_config_path(char *buf, size_t bufsize) {
 }
 
 static bool get_models_path(char *buf, size_t bufsize) {
-  char dir[512];
+  char dir[500];
   if (!get_config_path(dir, sizeof(dir)))
     return false;
-  snprintf(buf, bufsize, "%s/models.json", dir);
-  return true;
+  int written = snprintf(buf, bufsize, "%s/models.json", dir);
+  return written > 0 && (size_t)written < bufsize;
 }
 
 bool config_ensure_dir(void) {
@@ -138,8 +138,8 @@ bool config_load_models(ModelsFile *mf) {
     fclose(f);
     return false;
   }
-  fread(data, 1, len, f);
-  data[len] = '\0';
+  size_t read_len = fread(data, 1, len, f);
+  data[read_len] = '\0';
   fclose(f);
 
   char *p = data;
@@ -229,7 +229,7 @@ bool config_load_models(ModelsFile *mf) {
             while (*p && *p != ',' && *p != '}')
               p++;
           } else if (strcmp(mkey, "api_type") == 0) {
-            char type_str[32];
+            char type_str[32] = {0};
             p = parse_string(p, type_str, sizeof(type_str));
             m->api_type = api_type_from_name(type_str);
           }
@@ -355,9 +355,9 @@ bool config_load_settings(AppSettings *settings) {
     return false;
   }
 
-  fread(buf, 1, len, f);
+  size_t read_len = fread(buf, 1, len, f);
   fclose(f);
-  buf[len] = '\0';
+  buf[read_len] = '\0';
 
   if (strstr(buf, "\"skip_exit_confirm\":true") ||
       strstr(buf, "\"skip_exit_confirm\": true")) {
