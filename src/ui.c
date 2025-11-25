@@ -12,6 +12,7 @@ static bool g_ui_colors = false;
 #define COLOR_PAIR_STATUS 24
 #define COLOR_PAIR_USER_SEL 25
 #define COLOR_PAIR_BOT_SEL 26
+#define COLOR_PAIR_HINT_SEL 27
 
 #define SEL_BG 236
 
@@ -37,6 +38,7 @@ void ui_init_colors(void) {
   init_pair(COLOR_PAIR_STATUS, 8, -1);
   init_pair(COLOR_PAIR_USER_SEL, COLOR_GREEN, SEL_BG);
   init_pair(COLOR_PAIR_BOT_SEL, COLOR_MAGENTA, SEL_BG);
+  init_pair(COLOR_PAIR_HINT_SEL, 8, SEL_BG);
   g_ui_colors = true;
 }
 
@@ -536,11 +538,12 @@ void ui_draw_chat_ex(WINDOW *chat_win, const ChatHistory *history,
         if (user_tokens > 0) {
           char tok_str[32];
           snprintf(tok_str, sizeof(tok_str), " %d tok", user_tokens);
+          int hint_pair = is_selected ? COLOR_PAIR_HINT_SEL : COLOR_PAIR_HINT;
           if (g_ui_colors)
-            wattron(chat_win, COLOR_PAIR(COLOR_PAIR_HINT) | A_DIM);
+            wattron(chat_win, COLOR_PAIR(hint_pair) | A_DIM);
           mvwaddstr(chat_win, y, x + 2 + (int)strlen(user_name), tok_str);
           if (g_ui_colors)
-            wattroff(chat_win, COLOR_PAIR(COLOR_PAIR_HINT) | A_DIM);
+            wattroff(chat_win, COLOR_PAIR(hint_pair) | A_DIM);
         }
       } else if (dl->is_bot) {
         int pair = is_selected ? COLOR_PAIR_BOT_SEL : COLOR_PAIR_BOT;
@@ -600,11 +603,12 @@ void ui_draw_chat_ex(WINDOW *chat_win, const ChatHistory *history,
             }
           }
 
+          int hint_pair = is_selected ? COLOR_PAIR_HINT_SEL : COLOR_PAIR_HINT;
           if (g_ui_colors)
-            wattron(chat_win, COLOR_PAIR(COLOR_PAIR_HINT) | A_DIM);
+            wattron(chat_win, COLOR_PAIR(hint_pair) | A_DIM);
           mvwaddstr(chat_win, y, cursor_x, stats_str);
           if (g_ui_colors)
-            wattroff(chat_win, COLOR_PAIR(COLOR_PAIR_HINT) | A_DIM);
+            wattroff(chat_win, COLOR_PAIR(hint_pair) | A_DIM);
         }
       }
       continue;
