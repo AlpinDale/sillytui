@@ -15,6 +15,7 @@ Still in development.
 ### Installation & Usage
 
 ```bash
+sudo apt update && sudo apt install -y cmake libncursesw5-dev libcurl4-openssl-dev
 git clone https://github.com/AlpinDale/sillytui.git && cd sillytui
 make run
 ```
