@@ -783,8 +783,14 @@ int main(void) {
               free(ctx.buffer);
               llm_response_free(&resp);
             }
+            selected_msg = MSG_SELECT_NONE;
+            input_focused = true;
+            touchwin(chat_win);
+            touchwin(input_win);
             ui_draw_chat(chat_win, &history, selected_msg,
                          get_model_name(&models), user_disp, bot_disp);
+            ui_draw_input_multiline(input_win, input_buffer, cursor_pos,
+                                    input_focused, input_scroll_line);
           }
         } else if (msg && strncmp(msg, "Bot:", 4) == 0) {
           size_t swipe_count = history_get_swipe_count(&history, selected_msg);
