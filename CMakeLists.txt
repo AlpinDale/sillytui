@@ -17,6 +17,9 @@ add_executable(sillytui
     src/llm.c
     src/modal.c
     src/chat.c
+    src/character.c
+    src/persona.c
+    src/macros.c
 )
 
 target_compile_definitions(sillytui PRIVATE _XOPEN_SOURCE_EXTENDED NCURSES_WIDECHAR=1)

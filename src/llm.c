@@ -1,4 +1,5 @@
 #include "llm.h"
+#include "macros.h"
 #include <curl/curl.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -174,18 +175,312 @@ static char *escape_json_string(const char *str) {
   return escaped;
 }
 
+typedef struct {
+  char *data;
+  size_t len;
+  size_t cap;
+} StringBuilder;
+
+static void sb_init(StringBuilder *sb) {
+  sb->data = NULL;
+  sb->len = 0;
+  sb->cap = 0;
+}
+
+static void sb_append(StringBuilder *sb, const char *str) {
+  if (!str)
+    return;
+  size_t slen = strlen(str);
+  if (sb->len + slen + 1 > sb->cap) {
+    size_t newcap = sb->cap == 0 ? 1024 : sb->cap * 2;
+    while (newcap < sb->len + slen + 1)
+      newcap *= 2;
+    char *tmp = realloc(sb->data, newcap);
+    if (!tmp)
+      return;
+    sb->data = tmp;
+    sb->cap = newcap;
+  }
+  memcpy(sb->data + sb->len, str, slen);
+  sb->len += slen;
+  sb->data[sb->len] = '\0';
+}
+
+static void sb_free(StringBuilder *sb) {
+  free(sb->data);
+  sb->data = NULL;
+  sb->len = 0;
+  sb->cap = 0;
+}
+
+typedef struct {
+  char *role;
+  char *content;
+} ExampleMessage;
+
+static ExampleMessage *parse_mes_example(const char *mes_example,
+                                         size_t *out_count,
+                                         const char *char_name,
+                                         const char *user_name) {
+  *out_count = 0;
+  if (!mes_example || !mes_example[0])
+    return NULL;
+
+  size_t cap = 16;
+  ExampleMessage *messages = malloc(cap * sizeof(ExampleMessage));
+  if (!messages)
+    return NULL;
+
+  char *substituted = macro_substitute(mes_example, char_name, user_name);
+  if (!substituted) {
+    free(messages);
+    return NULL;
+  }
+
+  char *lines = substituted;
+  char *line = strtok(lines, "\n");
+
+  char *current_role = NULL;
+  StringBuilder current_content;
+  sb_init(&current_content);
+
+  char user_prefix[128];
+  char char_prefix[128];
+  snprintf(user_prefix, sizeof(user_prefix), "%s:", user_name);
+  snprintf(char_prefix, sizeof(char_prefix), "%s:", char_name);
+
+  while (line) {
+    while (*line == ' ' || *line == '\t')
+      line++;
+
+    if (strncmp(line, "<START>", 7) == 0) {
+      if (current_role && current_content.data) {
+        if (*out_count >= cap) {
+          cap *= 2;
+          ExampleMessage *tmp = realloc(messages, cap * sizeof(ExampleMessage));
+          if (!tmp)
+            break;
+          messages = tmp;
+        }
+        messages[*out_count].role = current_role;
+        messages[*out_count].content = current_content.data;
+        (*out_count)++;
+        current_role = NULL;
+        sb_init(&current_content);
+      }
+      line = strtok(NULL, "\n");
+      continue;
+    }
+
+    bool is_user = strncmp(line, user_prefix, strlen(user_prefix)) == 0;
+    bool is_char = strncmp(line, char_prefix, strlen(char_prefix)) == 0;
+
+    if (is_user || is_char) {
+      if (current_role && current_content.data) {
+        if (*out_count >= cap) {
+          cap *= 2;
+          ExampleMessage *tmp = realloc(messages, cap * sizeof(ExampleMessage));
+          if (!tmp)
+            break;
+          messages = tmp;
+        }
+        messages[*out_count].role = current_role;
+        messages[*out_count].content = current_content.data;
+        (*out_count)++;
+        sb_init(&current_content);
+      }
+
+      current_role = is_user ? strdup("user") : strdup("assistant");
+      const char *content_start =
+          line + (is_user ? strlen(user_prefix) : strlen(char_prefix));
+      while (*content_start == ' ')
+        content_start++;
+      sb_append(&current_content, content_start);
+    } else if (current_role) {
+      sb_append(&current_content, "\n");
+      sb_append(&current_content, line);
+    }
+
+    line = strtok(NULL, "\n");
+  }
+
+  if (current_role && current_content.data) {
+    if (*out_count >= cap) {
+      cap *= 2;
+      ExampleMessage *tmp = realloc(messages, cap * sizeof(ExampleMessage));
+      if (tmp)
+        messages = tmp;
+    }
+    if (*out_count < cap) {
+      messages[*out_count].role = current_role;
+      messages[*out_count].content = current_content.data;
+      (*out_count)++;
+    } else {
+      free(current_role);
+      sb_free(&current_content);
+    }
+  } else {
+    free(current_role);
+    sb_free(&current_content);
+  }
+
+  free(substituted);
+  return messages;
+}
+
+static void free_example_messages(ExampleMessage *messages, size_t count) {
+  if (!messages)
+    return;
+  for (size_t i = 0; i < count; i++) {
+    free(messages[i].role);
+    free(messages[i].content);
+  }
+  free(messages);
+}
+
+static char *build_system_prompt(const LLMContext *context) {
+  if (!context || !context->character)
+    return NULL;
+
+  const CharacterCard *card = context->character;
+  const Persona *persona = context->persona;
+  const char *char_name = card->name;
+  const char *user_name = persona ? persona_get_name(persona) : "User";
+
+  StringBuilder sb;
+  sb_init(&sb);
+
+  if (card->system_prompt && card->system_prompt[0]) {
+    char *substituted =
+        macro_substitute(card->system_prompt, char_name, user_name);
+    if (substituted) {
+      sb_append(&sb, substituted);
+      free(substituted);
+    }
+  } else {
+    char default_prompt[256];
+    snprintf(default_prompt, sizeof(default_prompt),
+             "Write %s's next reply in a fictional chat between %s and %s.",
+             char_name, char_name, user_name);
+    sb_append(&sb, default_prompt);
+  }
+
+  if (persona && persona->description[0]) {
+    sb_append(&sb, "\n\n[User Persona: ");
+    sb_append(&sb, user_name);
+    sb_append(&sb, "]\n");
+    char *substituted =
+        macro_substitute(persona->description, char_name, user_name);
+    if (substituted) {
+      sb_append(&sb, substituted);
+      free(substituted);
+    }
+  }
+
+  if (card->description && card->description[0]) {
+    sb_append(&sb, "\n\n[Character: ");
+    sb_append(&sb, char_name);
+    sb_append(&sb, "]\n");
+    char *substituted =
+        macro_substitute(card->description, char_name, user_name);
+    if (substituted) {
+      sb_append(&sb, substituted);
+      free(substituted);
+    }
+  }
+
+  if (card->personality && card->personality[0]) {
+    sb_append(&sb, "\n\n[Personality]\n");
+    char *substituted =
+        macro_substitute(card->personality, char_name, user_name);
+    if (substituted) {
+      sb_append(&sb, substituted);
+      free(substituted);
+    }
+  }
+
+  if (card->scenario && card->scenario[0]) {
+    sb_append(&sb, "\n\n[Scenario]\n");
+    char *substituted = macro_substitute(card->scenario, char_name, user_name);
+    if (substituted) {
+      sb_append(&sb, substituted);
+      free(substituted);
+    }
+  }
+
+  return sb.data;
+}
+
 static char *build_request_body(const char *model_id,
-                                const ChatHistory *history) {
-  size_t cap = 4096;
+                                const ChatHistory *history,
+                                const LLMContext *context) {
+  size_t cap = 16384;
   char *body = malloc(cap);
   if (!body)
     return NULL;
+
+  const char *char_name =
+      (context && context->character) ? context->character->name : NULL;
+  const char *user_name = (context && context->persona)
+                              ? persona_get_name(context->persona)
+                              : "User";
 
   size_t pos = 0;
   pos += snprintf(body + pos, cap - pos, "{\"model\":\"%s\",\"messages\":[",
                   model_id);
 
   bool first = true;
+
+  char *system_prompt = build_system_prompt(context);
+  if (system_prompt) {
+    char *escaped = escape_json_string(system_prompt);
+    if (escaped) {
+      size_t needed = strlen(escaped) + 64;
+      if (pos + needed >= cap) {
+        cap = (pos + needed) * 2;
+        char *tmp = realloc(body, cap);
+        if (tmp)
+          body = tmp;
+      }
+      pos += snprintf(body + pos, cap - pos,
+                      "{\"role\":\"system\",\"content\":\"%s\"}", escaped);
+      first = false;
+      free(escaped);
+    }
+    free(system_prompt);
+  }
+
+  if (context && context->character && context->character->mes_example) {
+    size_t example_count = 0;
+    ExampleMessage *examples = parse_mes_example(
+        context->character->mes_example, &example_count, char_name, user_name);
+    if (examples) {
+      for (size_t i = 0; i < example_count; i++) {
+        char *escaped = escape_json_string(examples[i].content);
+        if (!escaped)
+          continue;
+
+        size_t needed = strlen(escaped) + 64;
+        if (pos + needed >= cap) {
+          cap = (pos + needed) * 2;
+          char *tmp = realloc(body, cap);
+          if (tmp)
+            body = tmp;
+        }
+
+        if (!first)
+          body[pos++] = ',';
+        first = false;
+
+        pos += snprintf(body + pos, cap - pos,
+                        "{\"role\":\"%s\",\"content\":\"%s\"}",
+                        examples[i].role, escaped);
+        free(escaped);
+      }
+      free_example_messages(examples, example_count);
+    }
+  }
+
   for (size_t i = 0; i < history->count; i++) {
     const char *msg = history->items[i];
     const char *role = NULL;
@@ -232,12 +527,37 @@ static char *build_request_body(const char *model_id,
     free(escaped);
   }
 
+  if (context && context->character &&
+      context->character->post_history_instructions &&
+      context->character->post_history_instructions[0]) {
+    char *substituted = macro_substitute(
+        context->character->post_history_instructions, char_name, user_name);
+    if (substituted) {
+      char *escaped = escape_json_string(substituted);
+      if (escaped) {
+        size_t needed = strlen(escaped) + 64;
+        if (pos + needed >= cap) {
+          cap = (pos + needed) * 2;
+          char *tmp = realloc(body, cap);
+          if (tmp)
+            body = tmp;
+        }
+        if (!first)
+          body[pos++] = ',';
+        pos += snprintf(body + pos, cap - pos,
+                        "{\"role\":\"system\",\"content\":\"%s\"}", escaped);
+        free(escaped);
+      }
+      free(substituted);
+    }
+  }
+
   pos += snprintf(body + pos, cap - pos, "],\"stream\":true}");
   return body;
 }
 
 LLMResponse llm_chat(const ModelConfig *config, const ChatHistory *history,
-                     LLMStreamCallback stream_cb,
+                     const LLMContext *context, LLMStreamCallback stream_cb,
                      LLMProgressCallback progress_cb, void *userdata) {
   LLMResponse resp = {0};
 
@@ -255,7 +575,7 @@ LLMResponse llm_chat(const ModelConfig *config, const ChatHistory *history,
   char url[512];
   snprintf(url, sizeof(url), "%s/chat/completions", config->base_url);
 
-  char *body = build_request_body(config->model_id, history);
+  char *body = build_request_body(config->model_id, history, context);
   if (!body) {
     snprintf(resp.error, sizeof(resp.error), "Failed to build request");
     curl_easy_cleanup(curl);

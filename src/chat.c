@@ -220,6 +220,12 @@ bool chat_list_load(ChatList *list) {
       free(title);
     }
 
+    char *char_path = find_json_string(content, "character_path");
+    if (char_path) {
+      strncpy(meta->character_path, char_path, CHAT_CHAR_PATH_MAX - 1);
+      free(char_path);
+    }
+
     meta->created_at = find_json_number(content, "created_at");
     meta->updated_at = find_json_number(content, "updated_at");
     meta->message_count = find_json_number(content, "message_count");
@@ -243,7 +249,8 @@ bool chat_list_load(ChatList *list) {
   return true;
 }
 
-bool chat_save(const ChatHistory *history, const char *id, const char *title) {
+bool chat_save(const ChatHistory *history, const char *id, const char *title,
+               const char *character_path) {
   if (!ensure_chats_dir())
     return false;
 
@@ -266,6 +273,13 @@ bool chat_save(const ChatHistory *history, const char *id, const char *title) {
   fprintf(f, "{\n");
   fprintf(f, "  \"id\": \"%s\",\n", id);
   fprintf(f, "  \"title\": \"%s\",\n", escaped_title);
+  if (character_path && character_path[0]) {
+    char *escaped_path = escape_json(character_path);
+    if (escaped_path) {
+      fprintf(f, "  \"character_path\": \"%s\",\n", escaped_path);
+      free(escaped_path);
+    }
+  }
   fprintf(f, "  \"created_at\": %ld,\n", (long)now);
   fprintf(f, "  \"updated_at\": %ld,\n", (long)now);
   fprintf(f, "  \"message_count\": %zu,\n", history->count);
@@ -287,17 +301,89 @@ bool chat_save(const ChatHistory *history, const char *id, const char *title) {
   return true;
 }
 
-bool chat_load(ChatHistory *history, const char *id) {
+static char *find_chat_id_by_title(const char *title) {
+  const char *dir = get_chats_dir();
+  if (!dir)
+    return NULL;
+
+  DIR *d = opendir(dir);
+  if (!d)
+    return NULL;
+
+  char *found_id = NULL;
+  struct dirent *entry;
+  while ((entry = readdir(d)) != NULL) {
+    if (entry->d_name[0] == '.')
+      continue;
+
+    size_t namelen = strlen(entry->d_name);
+    if (namelen < 6 || strcmp(entry->d_name + namelen - 5, ".json") != 0)
+      continue;
+
+    char filepath[768];
+    snprintf(filepath, sizeof(filepath), "%s/%s", dir, entry->d_name);
+
+    char *content = read_file_contents(filepath, NULL);
+    if (!content)
+      continue;
+
+    char *chat_title = find_json_string(content, "title");
+    if (chat_title && strcmp(chat_title, title) == 0) {
+      char *chat_id = find_json_string(content, "id");
+      if (chat_id) {
+        found_id = chat_id;
+      }
+      free(chat_title);
+      free(content);
+      break;
+    }
+    if (chat_title)
+      free(chat_title);
+    free(content);
+  }
+
+  closedir(d);
+  return found_id;
+}
+
+bool chat_load(ChatHistory *history, const char *id_or_title,
+               char *out_character_path, size_t path_size) {
   const char *dir = get_chats_dir();
   if (!dir)
     return false;
 
   char filepath[768];
-  snprintf(filepath, sizeof(filepath), "%s/%s.json", dir, id);
+  snprintf(filepath, sizeof(filepath), "%s/%s.json", dir, id_or_title);
 
   char *content = read_file_contents(filepath, NULL);
-  if (!content)
+
+  char *found_id = NULL;
+  if (!content) {
+    found_id = find_chat_id_by_title(id_or_title);
+    if (found_id) {
+      snprintf(filepath, sizeof(filepath), "%s/%s.json", dir, found_id);
+      content = read_file_contents(filepath, NULL);
+    }
+  }
+
+  if (!content) {
+    if (found_id)
+      free(found_id);
     return false;
+  }
+
+  if (found_id)
+    free(found_id);
+
+  if (out_character_path && path_size > 0) {
+    out_character_path[0] = '\0';
+    char *char_path = find_json_string(content, "character_path");
+    if (char_path) {
+      strncpy(out_character_path, char_path, path_size - 1);
+      out_character_path[path_size - 1] = '\0';
+      free(char_path);
+    }
+  }
 
   history_free(history);
   history_init(history);

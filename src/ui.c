@@ -198,14 +198,15 @@ typedef struct {
   bool is_bot;
   bool is_first_line;
   bool is_spacer;
+  bool is_name_line;
   unsigned initial_style;
 } DisplayLine;
 
 static int build_display_lines(const ChatHistory *history, int content_width,
                                DisplayLine *lines, int max_lines) {
   int total = 0;
-  int prefix_width = 5;
-  int text_width = content_width - prefix_width;
+  int gutter_width = 2;
+  int text_width = content_width - gutter_width;
   if (text_width < 10)
     text_width = 10;
 
@@ -227,6 +228,20 @@ static int build_display_lines(const ChatHistory *history, int content_width,
         content++;
     }
 
+    if ((is_user || is_bot) && total < max_lines) {
+      lines[total].msg_index = (int)i;
+      lines[total].line_in_msg = -1;
+      lines[total].line_start = NULL;
+      lines[total].line_len = 0;
+      lines[total].is_user = is_user;
+      lines[total].is_bot = is_bot;
+      lines[total].is_first_line = true;
+      lines[total].is_spacer = false;
+      lines[total].is_name_line = true;
+      lines[total].initial_style = 0;
+      total++;
+    }
+
     int num_wrapped = wrap_text(content, text_width, wrapped, 200);
 
     unsigned running_style = 0;
@@ -237,8 +252,9 @@ static int build_display_lines(const ChatHistory *history, int content_width,
       lines[total].line_len = wrapped[line].len;
       lines[total].is_user = is_user;
       lines[total].is_bot = is_bot;
-      lines[total].is_first_line = (line == 0);
+      lines[total].is_first_line = false;
       lines[total].is_spacer = false;
+      lines[total].is_name_line = false;
       lines[total].initial_style = running_style;
 
       running_style = markdown_compute_style_after(
@@ -256,6 +272,7 @@ static int build_display_lines(const ChatHistory *history, int content_width,
       lines[total].is_bot = false;
       lines[total].is_first_line = false;
       lines[total].is_spacer = true;
+      lines[total].is_name_line = false;
       lines[total].initial_style = 0;
       total++;
     }
@@ -274,8 +291,8 @@ int ui_get_total_lines(WINDOW *chat_win, const ChatHistory *history) {
   if (content_width <= 0)
     return 0;
 
-  int prefix_width = 5;
-  int text_width = content_width - prefix_width;
+  int gutter_width = 2;
+  int text_width = content_width - gutter_width;
   if (text_width < 10)
     text_width = 10;
 
@@ -294,13 +311,24 @@ int ui_get_total_lines(WINDOW *chat_win, const ChatHistory *history) {
         content++;
     }
 
+    if (is_user || is_bot) {
+      total++;
+    }
     total += count_wrapped_lines(content, text_width);
+    if (i < history->count - 1) {
+      total++;
+    }
   }
   return total;
 }
 
 void ui_draw_chat(WINDOW *chat_win, const ChatHistory *history,
-                  int scroll_offset, const char *model_name) {
+                  int scroll_offset, const char *model_name,
+                  const char *user_name, const char *bot_name) {
+  if (!user_name || !user_name[0])
+    user_name = "You";
+  if (!bot_name || !bot_name[0])
+    bot_name = "Bot";
   werase(chat_win);
   draw_box(chat_win, COLOR_PAIR_BORDER);
 
@@ -345,8 +373,8 @@ void ui_draw_chat(WINDOW *chat_win, const ChatHistory *history,
       start_line = max_scroll;
   }
 
-  int prefix_width = 5;
-  int text_width = content_width - prefix_width;
+  int gutter_width = 2;
+  int text_width = content_width - gutter_width;
   if (text_width < 10)
     text_width = 10;
 
@@ -360,22 +388,35 @@ void ui_draw_chat(WINDOW *chat_win, const ChatHistory *history,
       continue;
     }
 
-    if (dl->is_first_line) {
+    if (dl->is_name_line) {
       if (dl->is_user) {
         if (g_ui_colors)
           wattron(chat_win, COLOR_PAIR(COLOR_PAIR_USER) | A_BOLD);
-        mvwaddstr(chat_win, y, x, "You");
+        mvwaddstr(chat_win, y, x, user_name);
         if (g_ui_colors)
           wattroff(chat_win, COLOR_PAIR(COLOR_PAIR_USER) | A_BOLD);
-        mvwaddstr(chat_win, y, x + 3, ": ");
       } else if (dl->is_bot) {
         if (g_ui_colors)
           wattron(chat_win, COLOR_PAIR(COLOR_PAIR_BOT) | A_BOLD);
-        mvwaddstr(chat_win, y, x, "Bot");
+        mvwaddstr(chat_win, y, x, bot_name);
         if (g_ui_colors)
           wattroff(chat_win, COLOR_PAIR(COLOR_PAIR_BOT) | A_BOLD);
-        mvwaddstr(chat_win, y, x + 3, ": ");
       }
+      continue;
+    }
+
+    if (dl->is_user) {
+      if (g_ui_colors)
+        wattron(chat_win, COLOR_PAIR(COLOR_PAIR_USER));
+      mvwaddch(chat_win, y, x, ACS_VLINE);
+      if (g_ui_colors)
+        wattroff(chat_win, COLOR_PAIR(COLOR_PAIR_USER));
+    } else if (dl->is_bot) {
+      if (g_ui_colors)
+        wattron(chat_win, COLOR_PAIR(COLOR_PAIR_BOT));
+      mvwaddch(chat_win, y, x, ACS_VLINE);
+      if (g_ui_colors)
+        wattroff(chat_win, COLOR_PAIR(COLOR_PAIR_BOT));
     }
 
     char line_buf[512];
@@ -385,13 +426,8 @@ void ui_draw_chat(WINDOW *chat_win, const ChatHistory *history,
     strncpy(line_buf, dl->line_start, to_copy);
     line_buf[to_copy] = '\0';
 
-    int text_x = x + prefix_width;
-    if (!dl->is_user && !dl->is_bot && dl->is_first_line) {
-      text_x = x;
-    }
-
-    markdown_render_line_styled(chat_win, y, text_x, text_width, line_buf,
-                                dl->initial_style);
+    markdown_render_line_styled(chat_win, y, x + gutter_width, text_width,
+                                line_buf, dl->initial_style);
   }
 
   if (total_display_lines > usable_lines) {
@@ -461,8 +497,8 @@ void ui_draw_input(WINDOW *input_win, const char *buffer, int cursor_pos) {
   wrefresh(input_win);
 }
 
-#define MAX_SUGGESTIONS 8
-#define SUGGESTION_BOX_WIDTH 50
+#define MAX_SUGGESTIONS 10
+#define SUGGESTION_BOX_WIDTH 60
 
 static bool fuzzy_match(const char *pattern, const char *str) {
   if (!pattern || !*pattern)

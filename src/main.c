@@ -9,12 +9,15 @@
 #include <sys/time.h>
 #include <unistd.h>
 
+#include "character.h"
 #include "chat.h"
 #include "config.h"
 #include "history.h"
 #include "llm.h"
+#include "macros.h"
 #include "markdown.h"
 #include "modal.h"
+#include "persona.h"
 #include "ui.h"
 
 #define INPUT_MAX 256
@@ -34,6 +37,8 @@ typedef struct {
   long long last_spinner_update;
   int *scroll_offset;
   const char *model_name;
+  const char *user_name;
+  const char *bot_name;
 } StreamContext;
 
 static long long get_time_ms(void) {
@@ -84,7 +89,7 @@ static void stream_callback(const char *chunk, void *userdata) {
   history_update(ctx->history, ctx->msg_index, display);
   *ctx->scroll_offset = -1;
   ui_draw_chat(ctx->chat_win, ctx->history, *ctx->scroll_offset,
-               ctx->model_name);
+               ctx->model_name, ctx->user_name, ctx->bot_name);
 }
 
 static void progress_callback(void *userdata) {
@@ -103,7 +108,7 @@ static void progress_callback(void *userdata) {
            SPINNER_FRAMES[ctx->spinner_frame]);
   history_update(ctx->history, ctx->msg_index, display);
   ui_draw_chat(ctx->chat_win, ctx->history, *ctx->scroll_offset,
-               ctx->model_name);
+               ctx->model_name, ctx->user_name, ctx->bot_name);
 }
 
 static const char *get_model_name(ModelsFile *mf) {
@@ -111,16 +116,27 @@ static const char *get_model_name(ModelsFile *mf) {
   return model ? model->name : NULL;
 }
 
+static const char *get_user_display_name(const Persona *persona) {
+  const char *name = persona_get_name(persona);
+  return (name && name[0]) ? name : "You";
+}
+
+static const char *get_bot_display_name(const CharacterCard *character,
+                                        bool loaded) {
+  return (loaded && character->name[0]) ? character->name : "Bot";
+}
+
 static void do_llm_reply(ChatHistory *history, WINDOW *chat_win,
                          const char *user_input, ModelsFile *mf,
-                         int *scroll_offset) {
+                         int *scroll_offset, const LLMContext *llm_ctx,
+                         const char *user_name, const char *bot_name) {
   ModelConfig *model = config_get_active(mf);
   const char *model_name = get_model_name(mf);
   if (!model) {
     history_add(history, "Bot: *looks confused* \"No model configured. Use "
                          "/model set to add one.\"");
     *scroll_offset = -1;
-    ui_draw_chat(chat_win, history, *scroll_offset, NULL);
+    ui_draw_chat(chat_win, history, *scroll_offset, NULL, user_name, bot_name);
     return;
   }
 
@@ -128,7 +144,8 @@ static void do_llm_reply(ChatHistory *history, WINDOW *chat_win,
   if (msg_index == SIZE_MAX)
     return;
   *scroll_offset = -1;
-  ui_draw_chat(chat_win, history, *scroll_offset, model_name);
+  ui_draw_chat(chat_win, history, *scroll_offset, model_name, user_name,
+               bot_name);
 
   StreamContext ctx = {.history = history,
                        .chat_win = chat_win,
@@ -139,14 +156,16 @@ static void do_llm_reply(ChatHistory *history, WINDOW *chat_win,
                        .spinner_frame = 0,
                        .last_spinner_update = get_time_ms(),
                        .scroll_offset = scroll_offset,
-                       .model_name = model_name};
+                       .model_name = model_name,
+                       .user_name = user_name,
+                       .bot_name = bot_name};
 
   ChatHistory hist_for_llm = {.items = history->items,
                               .count = history->count - 1,
                               .capacity = history->capacity};
 
-  LLMResponse resp =
-      llm_chat(model, &hist_for_llm, stream_callback, progress_callback, &ctx);
+  LLMResponse resp = llm_chat(model, &hist_for_llm, llm_ctx, stream_callback,
+                              progress_callback, &ctx);
 
   if (!resp.success) {
     char err_msg[512];
@@ -154,11 +173,13 @@ static void do_llm_reply(ChatHistory *history, WINDOW *chat_win,
              resp.error);
     history_update(history, msg_index, err_msg);
     *scroll_offset = -1;
-    ui_draw_chat(chat_win, history, *scroll_offset, model_name);
+    ui_draw_chat(chat_win, history, *scroll_offset, model_name, user_name,
+                 bot_name);
   } else if (ctx.buf_len == 0) {
     history_update(history, msg_index, "Bot: *stays silent*");
     *scroll_offset = -1;
-    ui_draw_chat(chat_win, history, *scroll_offset, model_name);
+    ui_draw_chat(chat_win, history, *scroll_offset, model_name, user_name,
+                 bot_name);
   }
 
   free(ctx.buffer);
@@ -171,6 +192,12 @@ static const SlashCommand SLASH_COMMANDS[] = {
     {"chat save", "Save current chat"},
     {"chat load", "Load a saved chat"},
     {"chat new", "Start a new chat"},
+    {"char load", "Load a character card"},
+    {"char info", "Show character info"},
+    {"char greetings", "Select alternate greeting"},
+    {"char unload", "Unload current character"},
+    {"persona set", "Edit your persona"},
+    {"persona info", "Show your persona"},
     {"help", "Show available commands"},
     {"clear", "Clear chat history"},
     {"quit", "Exit the application"},
@@ -179,7 +206,9 @@ static const SlashCommand SLASH_COMMANDS[] = {
 
 static bool handle_slash_command(const char *input, Modal *modal,
                                  ModelsFile *mf, ChatHistory *history,
-                                 char *current_chat_id) {
+                                 char *current_chat_id, char *current_char_path,
+                                 CharacterCard *character, Persona *persona,
+                                 bool *char_loaded) {
   if (strcmp(input, "/model set") == 0) {
     modal_open_model_set(modal);
     return true;
@@ -189,18 +218,159 @@ static bool handle_slash_command(const char *input, Modal *modal,
     return true;
   }
   if (strcmp(input, "/chat save") == 0) {
-    modal_open_chat_save(modal, current_chat_id);
+    modal_open_chat_save(modal, current_chat_id, current_char_path);
     return true;
   }
   if (strcmp(input, "/chat load") == 0) {
     modal_open_chat_list(modal);
     return true;
   }
+  if (strncmp(input, "/chat load ", 11) == 0) {
+    const char *id = input + 11;
+    while (*id == ' ')
+      id++;
+    if (*id) {
+      char loaded_char_path[CHAT_CHAR_PATH_MAX] = {0};
+      if (chat_load(history, id, loaded_char_path, sizeof(loaded_char_path))) {
+        strncpy(current_chat_id, id, CHAT_ID_MAX - 1);
+        current_chat_id[CHAT_ID_MAX - 1] = '\0';
+        if (loaded_char_path[0]) {
+          if (*char_loaded) {
+            character_free(character);
+          }
+          if (character_load(character, loaded_char_path)) {
+            *char_loaded = true;
+            strncpy(current_char_path, loaded_char_path,
+                    CHAT_CHAR_PATH_MAX - 1);
+            current_char_path[CHAT_CHAR_PATH_MAX - 1] = '\0';
+          } else {
+            *char_loaded = false;
+            current_char_path[0] = '\0';
+          }
+        } else {
+          if (*char_loaded) {
+            character_free(character);
+            *char_loaded = false;
+          }
+          current_char_path[0] = '\0';
+        }
+      } else {
+        char err_msg[256];
+        snprintf(err_msg, sizeof(err_msg), "Chat '%s' not found", id);
+        modal_open_message(modal, err_msg, true);
+      }
+    }
+    return true;
+  }
   if (strcmp(input, "/chat new") == 0) {
     history_free(history);
     history_init(history);
-    history_add(history, "Bot: *waves* \"New chat started!\"");
+    if (*char_loaded && character->first_mes && character->first_mes[0]) {
+      char *substituted = macro_substitute(
+          character->first_mes, character->name, persona_get_name(persona));
+      if (substituted) {
+        char first_msg[4096];
+        snprintf(first_msg, sizeof(first_msg), "Bot: %s", substituted);
+        history_add(history, first_msg);
+        free(substituted);
+      }
+    } else {
+      history_add(history, "Bot: *waves* \"New chat started!\"");
+    }
     current_chat_id[0] = '\0';
+    return true;
+  }
+  if (strcmp(input, "/char load") == 0 ||
+      strncmp(input, "/char load ", 11) == 0) {
+    const char *path = NULL;
+    if (strlen(input) > 11) {
+      path = input + 11;
+      while (*path == ' ')
+        path++;
+    }
+    if (path && *path) {
+      if (character_load(character, path)) {
+        *char_loaded = true;
+        char *config_path = character_copy_to_config(path);
+        if (config_path) {
+          strncpy(current_char_path, config_path, CHAT_CHAR_PATH_MAX - 1);
+          current_char_path[CHAT_CHAR_PATH_MAX - 1] = '\0';
+          free(config_path);
+        } else {
+          strncpy(current_char_path, path, CHAT_CHAR_PATH_MAX - 1);
+          current_char_path[CHAT_CHAR_PATH_MAX - 1] = '\0';
+        }
+        history_free(history);
+        history_init(history);
+        current_chat_id[0] = '\0';
+        if (character->first_mes && character->first_mes[0]) {
+          char *substituted = macro_substitute(
+              character->first_mes, character->name, persona_get_name(persona));
+          if (substituted) {
+            char first_msg[4096];
+            snprintf(first_msg, sizeof(first_msg), "Bot: %s", substituted);
+            history_add(history, first_msg);
+            free(substituted);
+          }
+        } else {
+          char welcome[256];
+          snprintf(welcome, sizeof(welcome), "Bot: *%s appears* \"Hello!\"",
+                   character->name);
+          history_add(history, welcome);
+        }
+      } else {
+        char err_msg[512];
+        snprintf(
+            err_msg, sizeof(err_msg),
+            "Failed to load character card:\n%s\n\nMake sure the file exists "
+            "and is a valid character card (.json or .png with embedded data).",
+            path);
+        modal_open_message(modal, err_msg, true);
+      }
+    } else {
+      modal_open_message(modal,
+                         "Usage: /char load <path>\n\nExample:\n/char load "
+                         "~/cards/char.json\n/char load ~/cards/char.png",
+                         false);
+    }
+    return true;
+  }
+  if (strcmp(input, "/char info") == 0) {
+    if (*char_loaded) {
+      modal_open_character_info(modal, character);
+    } else {
+      modal_open_message(modal, "No character loaded", true);
+    }
+    return true;
+  }
+  if (strcmp(input, "/char greetings") == 0) {
+    if (*char_loaded) {
+      modal_open_greeting_select(modal, character);
+    } else {
+      modal_open_message(modal, "No character loaded", true);
+    }
+    return true;
+  }
+  if (strcmp(input, "/char unload") == 0) {
+    if (*char_loaded) {
+      character_free(character);
+      *char_loaded = false;
+      current_char_path[0] = '\0';
+      history_add(history, "Bot: *Character unloaded*");
+    } else {
+      modal_open_message(modal, "No character loaded", true);
+    }
+    return true;
+  }
+  if (strcmp(input, "/persona set") == 0) {
+    modal_open_persona_edit(modal, persona);
+    return true;
+  }
+  if (strcmp(input, "/persona info") == 0) {
+    char info[512];
+    snprintf(info, sizeof(info), "Name: %s\n\nDescription:\n%s",
+             persona_get_name(persona), persona_get_description(persona));
+    modal_open_message(modal, info, false);
     return true;
   }
   if (strcmp(input, "/help") == 0) {
@@ -210,6 +380,10 @@ static bool handle_slash_command(const char *input, Modal *modal,
                        "/chat save - Save current chat\n"
                        "/chat load - Load a saved chat\n"
                        "/chat new - Start new chat\n"
+                       "/char load - Load character\n"
+                       "/char info - Character info\n"
+                       "/char greetings - Greetings\n"
+                       "/persona set - Edit persona\n"
                        "/clear - Clear chat history\n"
                        "/quit - Exit\n"
                        "\n"
@@ -222,7 +396,18 @@ static bool handle_slash_command(const char *input, Modal *modal,
   if (strcmp(input, "/clear") == 0) {
     history_free(history);
     history_init(history);
-    history_add(history, "Bot: *clears throat* \"Fresh start!\"");
+    if (*char_loaded && character->first_mes && character->first_mes[0]) {
+      char *substituted = macro_substitute(
+          character->first_mes, character->name, persona_get_name(persona));
+      if (substituted) {
+        char first_msg[4096];
+        snprintf(first_msg, sizeof(first_msg), "Bot: %s", substituted);
+        history_add(history, first_msg);
+        free(substituted);
+      }
+    } else {
+      history_add(history, "Bot: *clears throat* \"Fresh start!\"");
+    }
     return true;
   }
   return false;
@@ -237,6 +422,13 @@ int main(void) {
 
   AppSettings settings;
   config_load_settings(&settings);
+
+  Persona persona;
+  persona_load(&persona);
+
+  CharacterCard character;
+  memset(&character, 0, sizeof(character));
+  bool character_loaded = false;
 
   llm_init();
 
@@ -271,6 +463,7 @@ int main(void) {
   int scroll_offset = -1;
   bool running = true;
   char current_chat_id[CHAT_ID_MAX] = {0};
+  char current_char_path[CHAT_CHAR_PATH_MAX] = {0};
 
   if (models.count == 0) {
     history_add(&history, "Bot: *waves* \"Welcome! Use /model set to configure "
@@ -279,17 +472,23 @@ int main(void) {
     history_add(&history, "Bot: *waves* \"Ready to chat!\"");
   }
 
-  ui_draw_chat(chat_win, &history, scroll_offset, get_model_name(&models));
+  const char *user_disp = get_user_display_name(&persona);
+  const char *bot_disp = get_bot_display_name(&character, character_loaded);
+  ui_draw_chat(chat_win, &history, scroll_offset, get_model_name(&models),
+               user_disp, bot_disp);
   ui_draw_input(input_win, input_buffer, cursor_pos);
 
   while (running) {
+    user_disp = get_user_display_name(&persona);
+    bot_disp = get_bot_display_name(&character, character_loaded);
     WINDOW *active_win = modal_is_open(&modal) ? modal.win : input_win;
     int ch = wgetch(active_win);
 
     if (ch == KEY_RESIZE) {
       ui_layout_windows(&chat_win, &input_win);
       scroll_offset = -1;
-      ui_draw_chat(chat_win, &history, scroll_offset, get_model_name(&models));
+      ui_draw_chat(chat_win, &history, scroll_offset, get_model_name(&models),
+                   user_disp, bot_disp);
       ui_draw_input(input_win, input_buffer, cursor_pos);
       if (modal_is_open(&modal)) {
         modal_close(&modal);
@@ -298,10 +497,32 @@ int main(void) {
     }
 
     if (modal_is_open(&modal)) {
-      ModalResult result =
-          modal_handle_key(&modal, ch, &models, &history, current_chat_id);
-      if (result == MODAL_RESULT_CHAT_LOADED ||
-          result == MODAL_RESULT_CHAT_NEW) {
+      size_t selected_greeting = 0;
+      ModalResult result = modal_handle_key(
+          &modal, ch, &models, &history, current_chat_id, current_char_path,
+          sizeof(current_char_path), &persona, &selected_greeting);
+      if (result == MODAL_RESULT_CHAT_LOADED) {
+        scroll_offset = -1;
+        if (current_char_path[0]) {
+          if (character_loaded) {
+            character_free(&character);
+          }
+          if (character_load(&character, current_char_path)) {
+            character_loaded = true;
+          } else {
+            current_char_path[0] = '\0';
+            character_loaded = false;
+          }
+        } else {
+          if (character_loaded) {
+            character_free(&character);
+            character_loaded = false;
+          }
+        }
+        user_disp = get_user_display_name(&persona);
+        bot_disp = get_bot_display_name(&character, character_loaded);
+      }
+      if (result == MODAL_RESULT_CHAT_NEW) {
         scroll_offset = -1;
       }
       if (result == MODAL_RESULT_EXIT_CONFIRMED) {
@@ -311,13 +532,31 @@ int main(void) {
         }
         running = false;
       }
+      if (result == MODAL_RESULT_GREETING_SELECTED && character_loaded) {
+        const char *greeting =
+            character_get_greeting(&character, selected_greeting);
+        if (greeting) {
+          history_free(&history);
+          history_init(&history);
+          current_chat_id[0] = '\0';
+          char *substituted = macro_substitute(greeting, character.name,
+                                               persona_get_name(&persona));
+          if (substituted) {
+            char first_msg[4096];
+            snprintf(first_msg, sizeof(first_msg), "Bot: %s", substituted);
+            history_add(&history, first_msg);
+            free(substituted);
+          }
+          scroll_offset = -1;
+        }
+      }
       if (modal_is_open(&modal)) {
         modal_draw(&modal, &models);
       } else {
         touchwin(chat_win);
         touchwin(input_win);
-        ui_draw_chat(chat_win, &history, scroll_offset,
-                     get_model_name(&models));
+        ui_draw_chat(chat_win, &history, scroll_offset, get_model_name(&models),
+                     user_disp, bot_disp);
         ui_draw_input(input_win, input_buffer, cursor_pos);
       }
       continue;
@@ -327,8 +566,8 @@ int main(void) {
       if (suggestion_box_is_open(&suggestions)) {
         suggestion_box_close(&suggestions);
         touchwin(chat_win);
-        ui_draw_chat(chat_win, &history, scroll_offset,
-                     get_model_name(&models));
+        ui_draw_chat(chat_win, &history, scroll_offset, get_model_name(&models),
+                     user_disp, bot_disp);
         continue;
       }
       if (settings.skip_exit_confirm) {
@@ -359,8 +598,8 @@ int main(void) {
         }
         suggestion_box_close(&suggestions);
         touchwin(chat_win);
-        ui_draw_chat(chat_win, &history, scroll_offset,
-                     get_model_name(&models));
+        ui_draw_chat(chat_win, &history, scroll_offset, get_model_name(&models),
+                     user_disp, bot_disp);
         ui_draw_input(input_win, input_buffer, cursor_pos);
         if (ch == '\n' || ch == '\r') {
           goto process_enter;
@@ -382,7 +621,8 @@ int main(void) {
       scroll_offset -= 5;
       if (scroll_offset < 0)
         scroll_offset = 0;
-      ui_draw_chat(chat_win, &history, scroll_offset, get_model_name(&models));
+      ui_draw_chat(chat_win, &history, scroll_offset, get_model_name(&models),
+                   user_disp, bot_disp);
       continue;
     }
 
@@ -400,7 +640,8 @@ int main(void) {
       if (scroll_offset >= max_scroll) {
         scroll_offset = -1;
       }
-      ui_draw_chat(chat_win, &history, scroll_offset, get_model_name(&models));
+      ui_draw_chat(chat_win, &history, scroll_offset, get_model_name(&models),
+                   user_disp, bot_disp);
       continue;
     }
 
@@ -453,10 +694,13 @@ int main(void) {
 
       if (input_buffer[0] == '/') {
         if (handle_slash_command(input_buffer, &modal, &models, &history,
-                                 current_chat_id)) {
+                                 current_chat_id, current_char_path, &character,
+                                 &persona, &character_loaded)) {
           input_buffer[0] = '\0';
           input_len = 0;
           cursor_pos = 0;
+          user_disp = get_user_display_name(&persona);
+          bot_disp = get_bot_display_name(&character, character_loaded);
           if (modal_is_open(&modal)) {
             modal_draw(&modal, &models);
             ui_draw_input(input_win, input_buffer, cursor_pos);
@@ -464,7 +708,7 @@ int main(void) {
             scroll_offset = -1;
             touchwin(chat_win);
             ui_draw_chat(chat_win, &history, scroll_offset,
-                         get_model_name(&models));
+                         get_model_name(&models), user_disp, bot_disp);
             ui_draw_input(input_win, input_buffer, cursor_pos);
           }
           continue;
@@ -483,12 +727,15 @@ int main(void) {
 
       if (history_add(&history, user_line) != SIZE_MAX) {
         scroll_offset = -1;
-        ui_draw_chat(chat_win, &history, scroll_offset,
-                     get_model_name(&models));
+        ui_draw_chat(chat_win, &history, scroll_offset, get_model_name(&models),
+                     user_disp, bot_disp);
       }
       ui_draw_input(input_win, input_buffer, cursor_pos);
 
-      do_llm_reply(&history, chat_win, saved_input, &models, &scroll_offset);
+      LLMContext llm_ctx = {.character = character_loaded ? &character : NULL,
+                            .persona = &persona};
+      do_llm_reply(&history, chat_win, saved_input, &models, &scroll_offset,
+                   &llm_ctx, user_disp, bot_disp);
       continue;
     }
 
@@ -509,7 +756,7 @@ int main(void) {
         } else {
           touchwin(chat_win);
           ui_draw_chat(chat_win, &history, scroll_offset,
-                       get_model_name(&models));
+                       get_model_name(&models), user_disp, bot_disp);
         }
       }
       continue;
@@ -531,7 +778,7 @@ int main(void) {
         } else {
           touchwin(chat_win);
           ui_draw_chat(chat_win, &history, scroll_offset,
-                       get_model_name(&models));
+                       get_model_name(&models), user_disp, bot_disp);
         }
       }
       continue;
@@ -553,8 +800,8 @@ int main(void) {
         suggestion_box_draw(&suggestions);
       } else {
         touchwin(chat_win);
-        ui_draw_chat(chat_win, &history, scroll_offset,
-                     get_model_name(&models));
+        ui_draw_chat(chat_win, &history, scroll_offset, get_model_name(&models),
+                     user_disp, bot_disp);
       }
     }
   }
@@ -566,6 +813,9 @@ int main(void) {
   delwin(input_win);
   endwin();
   history_free(&history);
+  if (character_loaded) {
+    character_free(&character);
+  }
   llm_cleanup();
   return EXIT_SUCCESS;
 }
