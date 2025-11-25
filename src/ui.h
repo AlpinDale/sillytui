@@ -29,6 +29,7 @@ typedef struct {
 typedef struct {
   char name[128];
   char description[128];
+  char id[128];
 } DynamicItem;
 
 typedef struct {
@@ -44,6 +45,8 @@ typedef struct {
   DynamicItem *dynamic_items;
   int dynamic_count;
   bool showing_dynamic;
+  bool showing_characters;
+  char current_character[128];
 } SuggestionBox;
 
 typedef struct {
@@ -92,6 +95,7 @@ bool suggestion_box_update(SuggestionBox *sb, const char *filter,
 void suggestion_box_draw(SuggestionBox *sb);
 void suggestion_box_navigate(SuggestionBox *sb, int direction);
 const char *suggestion_box_get_selected(SuggestionBox *sb);
+const char *suggestion_box_get_selected_id(SuggestionBox *sb);
 void suggestion_box_close(SuggestionBox *sb);
 bool suggestion_box_is_open(const SuggestionBox *sb);
 

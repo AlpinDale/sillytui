@@ -956,6 +956,8 @@ void suggestion_box_init(SuggestionBox *sb, const SlashCommand *commands,
   sb->dynamic_items = malloc(sizeof(DynamicItem) * MAX_DYNAMIC_ITEMS);
   sb->dynamic_count = 0;
   sb->showing_dynamic = false;
+  sb->showing_characters = false;
+  sb->current_character[0] = '\0';
 }
 
 void suggestion_box_free(SuggestionBox *sb) {
@@ -986,12 +988,60 @@ static bool command_matches_filter(const char *cmd_name, const char *query) {
   return false;
 }
 
-static void load_chat_suggestions(SuggestionBox *sb, const char *filter_text) {
+static void load_character_suggestions(SuggestionBox *sb,
+                                       const char *filter_text) {
+  sb->dynamic_count = 0;
+
+  ChatCharacterList list;
+  chat_character_list_init(&list);
+  if (!chat_character_list_load(&list)) {
+    chat_character_list_free(&list);
+    return;
+  }
+
+  for (size_t i = 0; i < list.count && sb->dynamic_count < MAX_DYNAMIC_ITEMS;
+       i++) {
+    bool matches = true;
+    if (filter_text && filter_text[0]) {
+      // Case-insensitive match on character name or dirname
+      char lower_filter[128], lower_name[128], lower_dir[128];
+      size_t j;
+      for (j = 0; filter_text[j] && j < 127; j++)
+        lower_filter[j] = tolower((unsigned char)filter_text[j]);
+      lower_filter[j] = '\0';
+      for (j = 0; list.characters[i].name[j] && j < 127; j++)
+        lower_name[j] = tolower((unsigned char)list.characters[i].name[j]);
+      lower_name[j] = '\0';
+      for (j = 0; list.characters[i].dirname[j] && j < 127; j++)
+        lower_dir[j] = tolower((unsigned char)list.characters[i].dirname[j]);
+      lower_dir[j] = '\0';
+
+      matches = (strstr(lower_name, lower_filter) != NULL ||
+                 strstr(lower_dir, lower_filter) != NULL);
+    }
+    if (matches) {
+      snprintf(sb->dynamic_items[sb->dynamic_count].name, 128, "%s",
+               list.characters[i].name);
+      snprintf(sb->dynamic_items[sb->dynamic_count].description, 128,
+               "%zu chat%s", list.characters[i].chat_count,
+               list.characters[i].chat_count == 1 ? "" : "s");
+      snprintf(sb->dynamic_items[sb->dynamic_count].id, 128, "%s",
+               list.characters[i].dirname);
+      sb->dynamic_count++;
+    }
+  }
+
+  chat_character_list_free(&list);
+}
+
+static void load_chat_suggestions_for_character(SuggestionBox *sb,
+                                                const char *character_name,
+                                                const char *filter_text) {
   sb->dynamic_count = 0;
 
   ChatList list;
   chat_list_init(&list);
-  if (!chat_list_load(&list)) {
+  if (!chat_list_load_for_character(&list, character_name)) {
     chat_list_free(&list);
     return;
   }
@@ -1008,6 +1058,8 @@ static void load_chat_suggestions(SuggestionBox *sb, const char *filter_text) {
                list.chats[i].title);
       snprintf(sb->dynamic_items[sb->dynamic_count].description, 128,
                "%zu msgs", list.chats[i].message_count);
+      snprintf(sb->dynamic_items[sb->dynamic_count].id, 128, "%s",
+               list.chats[i].id);
       sb->dynamic_count++;
     }
   }
@@ -1031,8 +1083,29 @@ bool suggestion_box_update(SuggestionBox *sb, const char *filter,
 
   if (strncmp(query, chat_load_prefix, prefix_len) == 0) {
     sb->showing_dynamic = true;
-    const char *chat_filter = query + prefix_len;
-    load_chat_suggestions(sb, chat_filter);
+    const char *after_prefix = query + prefix_len;
+
+    const char *space_pos = strchr(after_prefix, ' ');
+    if (space_pos && space_pos > after_prefix) {
+      size_t char_name_len = space_pos - after_prefix;
+      char character_name[128];
+      if (char_name_len < sizeof(character_name)) {
+        strncpy(character_name, after_prefix, char_name_len);
+        character_name[char_name_len] = '\0';
+
+        sb->showing_characters = false;
+        strncpy(sb->current_character, character_name,
+                sizeof(sb->current_character) - 1);
+        sb->current_character[sizeof(sb->current_character) - 1] = '\0';
+
+        const char *chat_filter = space_pos + 1;
+        load_chat_suggestions_for_character(sb, character_name, chat_filter);
+      }
+    } else {
+      sb->showing_characters = true;
+      sb->current_character[0] = '\0';
+      load_character_suggestions(sb, after_prefix);
+    }
 
     if (sb->dynamic_count == 0) {
       bool was_open = sb->win != NULL;
@@ -1247,6 +1320,19 @@ void suggestion_box_draw(SuggestionBox *sb) {
     }
   }
 
+  if (sb->showing_dynamic && sb->showing_characters) {
+    const char *hint = " Tab:chats  Enter:latest ";
+    int hint_len = (int)strlen(hint);
+    int hint_x = (w - hint_len) / 2;
+    if (hint_x > 1 && hint_x + hint_len < w - 1) {
+      if (g_ui_colors)
+        wattron(sb->win, COLOR_PAIR(COLOR_PAIR_HINT));
+      mvwprintw(sb->win, h - 1, hint_x, "%s", hint);
+      if (g_ui_colors)
+        wattroff(sb->win, COLOR_PAIR(COLOR_PAIR_HINT));
+    }
+  }
+
   wrefresh(sb->win);
 }
 
@@ -1280,6 +1366,14 @@ const char *suggestion_box_get_selected(SuggestionBox *sb) {
   return sb->commands[cmd_idx].name;
 }
 
+const char *suggestion_box_get_selected_id(SuggestionBox *sb) {
+  if (sb->matched_count == 0 || sb->active_index < 0)
+    return NULL;
+  if (sb->showing_dynamic && sb->active_index < sb->dynamic_count)
+    return sb->dynamic_items[sb->active_index].id;
+  return NULL;
+}
+
 void suggestion_box_close(SuggestionBox *sb) {
   if (sb->win) {
     werase(sb->win);
@@ -1290,6 +1384,8 @@ void suggestion_box_close(SuggestionBox *sb) {
   sb->matched_count = 0;
   sb->active_index = 0;
   sb->scroll_offset = 0;
+  sb->showing_characters = false;
+  sb->current_character[0] = '\0';
 }
 
 bool suggestion_box_is_open(const SuggestionBox *sb) {

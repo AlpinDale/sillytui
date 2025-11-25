@@ -225,7 +225,9 @@ static bool handle_slash_command(const char *input, Modal *modal,
     return true;
   }
   if (strcmp(input, "/chat save") == 0) {
-    modal_open_chat_save(modal, current_chat_id, current_char_path);
+    const char *char_name =
+        (*char_loaded && character->name[0]) ? character->name : NULL;
+    modal_open_chat_save(modal, current_chat_id, current_char_path, char_name);
     return true;
   }
   if (strcmp(input, "/chat load") == 0) {
@@ -233,14 +235,50 @@ static bool handle_slash_command(const char *input, Modal *modal,
     return true;
   }
   if (strncmp(input, "/chat load ", 11) == 0) {
-    const char *id = input + 11;
-    while (*id == ' ')
-      id++;
-    if (*id) {
+    const char *args = input + 11;
+    while (*args == ' ')
+      args++;
+    if (*args) {
+      // Parse: <character> [chat_id]
+      char char_name[CHAT_CHAR_NAME_MAX] = {0};
+      char chat_id[CHAT_ID_MAX] = {0};
+
+      const char *space = strchr(args, ' ');
+      if (space) {
+        size_t char_len = space - args;
+        if (char_len < sizeof(char_name)) {
+          strncpy(char_name, args, char_len);
+          char_name[char_len] = '\0';
+        }
+        const char *id_start = space + 1;
+        while (*id_start == ' ')
+          id_start++;
+        if (*id_start) {
+          strncpy(chat_id, id_start, CHAT_ID_MAX - 1);
+          chat_id[CHAT_ID_MAX - 1] = '\0';
+        }
+      } else {
+        strncpy(char_name, args, sizeof(char_name) - 1);
+        char_name[sizeof(char_name) - 1] = '\0';
+      }
+
       char loaded_char_path[CHAT_CHAR_PATH_MAX] = {0};
-      if (chat_load(history, id, loaded_char_path, sizeof(loaded_char_path))) {
-        strncpy(current_chat_id, id, CHAT_ID_MAX - 1);
-        current_chat_id[CHAT_ID_MAX - 1] = '\0';
+      bool loaded = false;
+
+      if (chat_id[0]) {
+        loaded = chat_load(history, chat_id, char_name, loaded_char_path,
+                           sizeof(loaded_char_path));
+        if (loaded) {
+          strncpy(current_chat_id, chat_id, CHAT_ID_MAX - 1);
+          current_chat_id[CHAT_ID_MAX - 1] = '\0';
+        }
+      } else {
+        loaded = chat_load_latest(history, char_name, loaded_char_path,
+                                  sizeof(loaded_char_path), current_chat_id,
+                                  CHAT_ID_MAX);
+      }
+
+      if (loaded) {
         if (loaded_char_path[0]) {
           if (*char_loaded) {
             character_free(character);
@@ -263,7 +301,13 @@ static bool handle_slash_command(const char *input, Modal *modal,
         }
       } else {
         char err_msg[256];
-        snprintf(err_msg, sizeof(err_msg), "Chat '%s' not found", id);
+        if (chat_id[0]) {
+          snprintf(err_msg, sizeof(err_msg), "Chat '%s' not found for %s",
+                   chat_id, char_name);
+        } else {
+          snprintf(err_msg, sizeof(err_msg), "No chats found for '%s'",
+                   char_name);
+        }
         modal_open_message(modal, err_msg, true);
       }
     }
@@ -285,6 +329,10 @@ static bool handle_slash_command(const char *input, Modal *modal,
       history_add(history, "Bot: *waves* \"New chat started!\"");
     }
     current_chat_id[0] = '\0';
+    const char *char_name =
+        (*char_loaded && character->name[0]) ? character->name : NULL;
+    chat_auto_save(history, current_chat_id, CHAT_ID_MAX, current_char_path,
+                   char_name);
     return true;
   }
   if (strcmp(input, "/char load") == 0 ||
@@ -325,6 +373,8 @@ static bool handle_slash_command(const char *input, Modal *modal,
                    character->name);
           history_add(history, welcome);
         }
+        chat_auto_save(history, current_chat_id, CHAT_ID_MAX, current_char_path,
+                       character->name);
       } else {
         char err_msg[512];
         snprintf(
@@ -415,6 +465,10 @@ static bool handle_slash_command(const char *input, Modal *modal,
     } else {
       history_add(history, "Bot: *clears throat* \"Fresh start!\"");
     }
+    const char *char_name =
+        (*char_loaded && character->name[0]) ? character->name : NULL;
+    chat_auto_save(history, current_chat_id, CHAT_ID_MAX, current_char_path,
+                   char_name);
     return true;
   }
   return false;
@@ -584,6 +638,9 @@ int main(void) {
           }
           selected_msg = MSG_SELECT_NONE;
           input_focused = true;
+
+          chat_auto_save(&history, current_chat_id, sizeof(current_chat_id),
+                         current_char_path, character.name);
         }
       }
       if (result == MODAL_RESULT_MESSAGE_EDITED) {
@@ -598,6 +655,11 @@ int main(void) {
             snprintf(new_msg, sizeof(new_msg), "Bot: %s", new_content);
           }
           history_update(&history, msg_idx, new_msg);
+
+          const char *char_name =
+              (character_loaded && character.name[0]) ? character.name : NULL;
+          chat_auto_save(&history, current_chat_id, sizeof(current_chat_id),
+                         current_char_path, char_name);
         }
         selected_msg = MSG_SELECT_NONE;
         input_focused = true;
@@ -606,6 +668,11 @@ int main(void) {
         int msg_idx = modal_get_edit_msg_index(&modal);
         if (msg_idx >= 0 && msg_idx < (int)history.count) {
           history_delete(&history, msg_idx);
+
+          const char *char_name =
+              (character_loaded && character.name[0]) ? character.name : NULL;
+          chat_auto_save(&history, current_chat_id, sizeof(current_chat_id),
+                         current_char_path, char_name);
         }
         selected_msg = MSG_SELECT_NONE;
         input_focused = true;
@@ -659,9 +726,78 @@ int main(void) {
       }
       if (ch == '\t' || ch == '\n' || ch == '\r') {
         const char *selected = suggestion_box_get_selected(&suggestions);
+        const char *selected_id = suggestion_box_get_selected_id(&suggestions);
         if (selected) {
           if (suggestions.showing_dynamic) {
-            snprintf(input_buffer, INPUT_MAX, "/chat load %s", selected);
+            if (suggestions.showing_characters) {
+              if (ch == '\t') {
+                snprintf(input_buffer, INPUT_MAX, "/chat load %s ",
+                         selected_id ? selected_id : selected);
+                input_len = (int)strlen(input_buffer);
+                cursor_pos = input_len;
+                suggestion_box_close(&suggestions);
+                touchwin(chat_win);
+                ui_draw_chat(chat_win, &history, selected_msg,
+                             get_model_name(&models), user_disp, bot_disp,
+                             false);
+                ui_draw_input_multiline(input_win, input_buffer, cursor_pos,
+                                        input_focused, input_scroll_line,
+                                        false);
+                int input_y = getbegy(input_win);
+                int input_x = getbegx(input_win);
+                suggestion_box_update(&suggestions, input_buffer, input_win,
+                                      input_y, input_x);
+                if (suggestion_box_is_open(&suggestions)) {
+                  suggestion_box_draw(&suggestions);
+                }
+                continue;
+              } else {
+                char loaded_char_path[CHAT_CHAR_PATH_MAX] = {0};
+                const char *char_name = selected_id ? selected_id : selected;
+                if (chat_load_latest(&history, char_name, loaded_char_path,
+                                     sizeof(loaded_char_path), current_chat_id,
+                                     sizeof(current_chat_id))) {
+                  if (loaded_char_path[0]) {
+                    if (character_loaded) {
+                      character_free(&character);
+                    }
+                    if (character_load(&character, loaded_char_path)) {
+                      character_loaded = true;
+                      strncpy(current_char_path, loaded_char_path,
+                              CHAT_CHAR_PATH_MAX - 1);
+                    } else {
+                      character_loaded = false;
+                      current_char_path[0] = '\0';
+                    }
+                  }
+                  input_buffer[0] = '\0';
+                  input_len = 0;
+                  cursor_pos = 0;
+                  selected_msg = MSG_SELECT_NONE;
+                  input_focused = true;
+                } else {
+                  snprintf(input_buffer, INPUT_MAX, "No chats found for %s",
+                           selected);
+                  input_len = 0;
+                  cursor_pos = 0;
+                }
+                suggestion_box_close(&suggestions);
+                touchwin(chat_win);
+                user_disp = get_user_display_name(&persona);
+                bot_disp = get_bot_display_name(&character, character_loaded);
+                ui_draw_chat(chat_win, &history, selected_msg,
+                             get_model_name(&models), user_disp, bot_disp,
+                             false);
+                ui_draw_input_multiline(input_win, input_buffer, cursor_pos,
+                                        input_focused, input_scroll_line,
+                                        false);
+                continue;
+              }
+            } else {
+              snprintf(input_buffer, INPUT_MAX, "/chat load %s %s",
+                       suggestions.current_character,
+                       selected_id ? selected_id : selected);
+            }
           } else {
             snprintf(input_buffer, INPUT_MAX, "/%s", selected);
           }
@@ -880,6 +1016,11 @@ int main(void) {
             history_set_active_swipe(&history, selected_msg, active - 1);
             ui_draw_chat(chat_win, &history, selected_msg,
                          get_model_name(&models), user_disp, bot_disp, false);
+
+            const char *char_name =
+                (character_loaded && character.name[0]) ? character.name : NULL;
+            chat_auto_save(&history, current_chat_id, sizeof(current_chat_id),
+                           current_char_path, char_name);
           }
         }
       }
@@ -970,6 +1111,11 @@ int main(void) {
                          get_model_name(&models), user_disp, bot_disp, false);
             ui_draw_input_multiline(input_win, input_buffer, cursor_pos,
                                     input_focused, input_scroll_line, false);
+
+            const char *char_name =
+                (character_loaded && character.name[0]) ? character.name : NULL;
+            chat_auto_save(&history, current_chat_id, sizeof(current_chat_id),
+                           current_char_path, char_name);
           }
         } else if (msg && strncmp(msg, "Bot:", 4) == 0) {
           size_t swipe_count = history_get_swipe_count(&history, selected_msg);
@@ -978,6 +1124,11 @@ int main(void) {
             history_set_active_swipe(&history, selected_msg, active + 1);
             ui_draw_chat(chat_win, &history, selected_msg,
                          get_model_name(&models), user_disp, bot_disp, false);
+
+            const char *char_name =
+                (character_loaded && character.name[0]) ? character.name : NULL;
+            chat_auto_save(&history, current_chat_id, sizeof(current_chat_id),
+                           current_char_path, char_name);
           }
         }
       }
@@ -1047,6 +1198,11 @@ int main(void) {
         ui_draw_chat_ex(chat_win, &history, selected_msg,
                         get_model_name(&models), user_disp, bot_disp, true,
                         NULL);
+
+        const char *char_name =
+            (character_loaded && character.name[0]) ? character.name : NULL;
+        chat_auto_save(&history, current_chat_id, sizeof(current_chat_id),
+                       current_char_path, char_name);
         continue;
       }
       if (ch == KEY_BACKSPACE || ch == 127 || ch == 8) {
@@ -1189,6 +1345,11 @@ int main(void) {
                             .persona = &persona};
       do_llm_reply(&history, chat_win, input_win, saved_input, &models,
                    &selected_msg, &llm_ctx, user_disp, bot_disp);
+
+      const char *char_name =
+          (character_loaded && character.name[0]) ? character.name : NULL;
+      chat_auto_save(&history, current_chat_id, sizeof(current_chat_id),
+                     current_char_path, char_name);
       continue;
     }
 

@@ -1,4 +1,5 @@
 #include "chat.h"
+#include <ctype.h>
 #include <dirent.h>
 #include <errno.h>
 #include <stdio.h>
@@ -6,6 +7,8 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <unistd.h>
+
+#define DEFAULT_CHAR_DIR "_default"
 
 static const char *get_chats_dir(void) {
   static char path[512] = {0};
@@ -18,6 +21,45 @@ static const char *get_chats_dir(void) {
   return path;
 }
 
+void chat_sanitize_dirname(const char *name, char *out, size_t out_size) {
+  if (!name || !out || out_size == 0)
+    return;
+
+  size_t j = 0;
+  for (size_t i = 0; name[i] && j < out_size - 1; i++) {
+    unsigned char c = (unsigned char)name[i];
+    if (isalnum(c) || c == '-' || c == '_') {
+      out[j++] = (char)tolower(c);
+    } else if (c == ' ') {
+      out[j++] = '_';
+    }
+  }
+  out[j] = '\0';
+
+  if (j == 0) {
+    strncpy(out, DEFAULT_CHAR_DIR, out_size - 1);
+    out[out_size - 1] = '\0';
+  }
+}
+
+static bool get_character_chats_dir(const char *character_name, char *out,
+                                    size_t out_size) {
+  const char *base = get_chats_dir();
+  if (!base)
+    return false;
+
+  char sanitized[CHAT_CHAR_NAME_MAX];
+  if (character_name && character_name[0]) {
+    chat_sanitize_dirname(character_name, sanitized, sizeof(sanitized));
+  } else {
+    strncpy(sanitized, DEFAULT_CHAR_DIR, sizeof(sanitized) - 1);
+    sanitized[sizeof(sanitized) - 1] = '\0';
+  }
+
+  snprintf(out, out_size, "%s/%s", base, sanitized);
+  return true;
+}
+
 static bool ensure_chats_dir(void) {
   const char *dir = get_chats_dir();
   if (!dir || dir[0] == '\0')
@@ -27,6 +69,18 @@ static bool ensure_chats_dir(void) {
   snprintf(parent, sizeof(parent), "%s/.config/sillytui", getenv("HOME"));
   mkdir(parent, 0755);
   mkdir(dir, 0755);
+  return true;
+}
+
+static bool ensure_character_chats_dir(const char *character_name) {
+  if (!ensure_chats_dir())
+    return false;
+
+  char char_dir[768];
+  if (!get_character_chats_dir(character_name, char_dir, sizeof(char_dir)))
+    return false;
+
+  mkdir(char_dir, 0755);
   return true;
 }
 
@@ -84,11 +138,11 @@ static char *read_file_contents(const char *path, size_t *out_len) {
     return NULL;
   }
 
-  size_t read = fread(buf, 1, len, f);
+  size_t read_count = fread(buf, 1, len, f);
   fclose(f);
-  buf[read] = '\0';
+  buf[read_count] = '\0';
   if (out_len)
-    *out_len = read;
+    *out_len = read_count;
   return buf;
 }
 
@@ -161,15 +215,51 @@ void chat_list_free(ChatList *list) {
   list->capacity = 0;
 }
 
-bool chat_list_load(ChatList *list) {
-  chat_list_free(list);
-  chat_list_init(list);
-
-  const char *dir = get_chats_dir();
-  if (!dir)
+static bool load_chat_meta_from_file(const char *filepath,
+                                     const char *char_dirname, ChatMeta *meta) {
+  char *content = read_file_contents(filepath, NULL);
+  if (!content)
     return false;
 
-  DIR *d = opendir(dir);
+  memset(meta, 0, sizeof(ChatMeta));
+
+  char *id = find_json_string(content, "id");
+  if (id) {
+    strncpy(meta->id, id, CHAT_ID_MAX - 1);
+    free(id);
+  }
+
+  char *title = find_json_string(content, "title");
+  if (title) {
+    strncpy(meta->title, title, CHAT_TITLE_MAX - 1);
+    free(title);
+  }
+
+  char *char_path = find_json_string(content, "character_path");
+  if (char_path) {
+    strncpy(meta->character_path, char_path, CHAT_CHAR_PATH_MAX - 1);
+    free(char_path);
+  }
+
+  char *char_name = find_json_string(content, "character_name");
+  if (char_name) {
+    strncpy(meta->character_name, char_name, CHAT_CHAR_NAME_MAX - 1);
+    free(char_name);
+  } else if (char_dirname && strcmp(char_dirname, DEFAULT_CHAR_DIR) != 0) {
+    strncpy(meta->character_name, char_dirname, CHAT_CHAR_NAME_MAX - 1);
+  }
+
+  meta->created_at = find_json_number(content, "created_at");
+  meta->updated_at = find_json_number(content, "updated_at");
+  meta->message_count = find_json_number(content, "message_count");
+
+  free(content);
+  return true;
+}
+
+static bool load_chats_from_directory(ChatList *list, const char *dir_path,
+                                      const char *char_dirname) {
+  DIR *d = opendir(dir_path);
   if (!d)
     return false;
 
@@ -182,59 +272,87 @@ bool chat_list_load(ChatList *list) {
     if (namelen < 6 || strcmp(entry->d_name + namelen - 5, ".json") != 0)
       continue;
 
-    char filepath[768];
-    snprintf(filepath, sizeof(filepath), "%s/%s", dir, entry->d_name);
-
-    char *content = read_file_contents(filepath, NULL);
-    if (!content)
-      continue;
+    char filepath[1024];
+    snprintf(filepath, sizeof(filepath), "%s/%s", dir_path, entry->d_name);
 
     if (list->count >= list->capacity) {
       size_t newcap = list->capacity == 0 ? 8 : list->capacity * 2;
       ChatMeta *tmp = realloc(list->chats, newcap * sizeof(ChatMeta));
-      if (!tmp) {
-        free(content);
+      if (!tmp)
         continue;
-      }
       list->chats = tmp;
       list->capacity = newcap;
     }
 
     ChatMeta *meta = &list->chats[list->count];
-    memset(meta, 0, sizeof(ChatMeta));
-
-    char *id = find_json_string(content, "id");
-    if (id) {
-      strncpy(meta->id, id, CHAT_ID_MAX - 1);
-      free(id);
-    } else {
-      strncpy(meta->id, entry->d_name, CHAT_ID_MAX - 1);
-      char *dot = strrchr(meta->id, '.');
-      if (dot)
-        *dot = '\0';
+    if (load_chat_meta_from_file(filepath, char_dirname, meta)) {
+      list->count++;
     }
-
-    char *title = find_json_string(content, "title");
-    if (title) {
-      strncpy(meta->title, title, CHAT_TITLE_MAX - 1);
-      free(title);
-    }
-
-    char *char_path = find_json_string(content, "character_path");
-    if (char_path) {
-      strncpy(meta->character_path, char_path, CHAT_CHAR_PATH_MAX - 1);
-      free(char_path);
-    }
-
-    meta->created_at = find_json_number(content, "created_at");
-    meta->updated_at = find_json_number(content, "updated_at");
-    meta->message_count = find_json_number(content, "message_count");
-
-    free(content);
-    list->count++;
   }
 
   closedir(d);
+  return true;
+}
+
+bool chat_list_load(ChatList *list) {
+  return chat_list_load_for_character(list, NULL);
+}
+
+bool chat_list_load_for_character(ChatList *list, const char *character_name) {
+  chat_list_free(list);
+  chat_list_init(list);
+
+  const char *base_dir = get_chats_dir();
+  if (!base_dir)
+    return false;
+
+  if (character_name && character_name[0]) {
+    char char_dir[768];
+    if (!get_character_chats_dir(character_name, char_dir, sizeof(char_dir)))
+      return false;
+
+    char sanitized[CHAT_CHAR_NAME_MAX];
+    chat_sanitize_dirname(character_name, sanitized, sizeof(sanitized));
+    load_chats_from_directory(list, char_dir, sanitized);
+  } else {
+    DIR *d = opendir(base_dir);
+    if (!d)
+      return false;
+
+    struct dirent *entry;
+    while ((entry = readdir(d)) != NULL) {
+      if (entry->d_name[0] == '.')
+        continue;
+
+      char subdir_path[768];
+      snprintf(subdir_path, sizeof(subdir_path), "%s/%s", base_dir,
+               entry->d_name);
+
+      struct stat st;
+      if (stat(subdir_path, &st) == 0 && S_ISDIR(st.st_mode)) {
+        load_chats_from_directory(list, subdir_path, entry->d_name);
+      } else if (S_ISREG(st.st_mode)) {
+        size_t namelen = strlen(entry->d_name);
+        if (namelen >= 6 && strcmp(entry->d_name + namelen - 5, ".json") == 0) {
+          if (list->count >= list->capacity) {
+            size_t newcap = list->capacity == 0 ? 8 : list->capacity * 2;
+            ChatMeta *tmp = realloc(list->chats, newcap * sizeof(ChatMeta));
+            if (tmp) {
+              list->chats = tmp;
+              list->capacity = newcap;
+            }
+          }
+          if (list->count < list->capacity) {
+            ChatMeta *meta = &list->chats[list->count];
+            if (load_chat_meta_from_file(subdir_path, NULL, meta)) {
+              list->count++;
+            }
+          }
+        }
+      }
+    }
+    closedir(d);
+  }
 
   for (size_t i = 0; i < list->count; i++) {
     for (size_t j = i + 1; j < list->count; j++) {
@@ -250,13 +368,16 @@ bool chat_list_load(ChatList *list) {
 }
 
 bool chat_save(const ChatHistory *history, const char *id, const char *title,
-               const char *character_path) {
-  if (!ensure_chats_dir())
+               const char *character_path, const char *character_name) {
+  if (!ensure_character_chats_dir(character_name))
     return false;
 
-  const char *dir = get_chats_dir();
-  char filepath[768];
-  snprintf(filepath, sizeof(filepath), "%s/%s.json", dir, id);
+  char char_dir[768];
+  if (!get_character_chats_dir(character_name, char_dir, sizeof(char_dir)))
+    return false;
+
+  char filepath[1024];
+  snprintf(filepath, sizeof(filepath), "%s/%s.json", char_dir, id);
 
   FILE *f = fopen(filepath, "w");
   if (!f)
@@ -278,6 +399,13 @@ bool chat_save(const ChatHistory *history, const char *id, const char *title,
     if (escaped_path) {
       fprintf(f, "  \"character_path\": \"%s\",\n", escaped_path);
       free(escaped_path);
+    }
+  }
+  if (character_name && character_name[0]) {
+    char *escaped_name = escape_json(character_name);
+    if (escaped_name) {
+      fprintf(f, "  \"character_name\": \"%s\",\n", escaped_name);
+      free(escaped_name);
     }
   }
   fprintf(f, "  \"created_at\": %ld,\n", (long)now);
@@ -310,79 +438,12 @@ bool chat_save(const ChatHistory *history, const char *id, const char *title,
   return true;
 }
 
-static char *find_chat_id_by_title(const char *title) {
-  const char *dir = get_chats_dir();
-  if (!dir)
-    return NULL;
-
-  DIR *d = opendir(dir);
-  if (!d)
-    return NULL;
-
-  char *found_id = NULL;
-  struct dirent *entry;
-  while ((entry = readdir(d)) != NULL) {
-    if (entry->d_name[0] == '.')
-      continue;
-
-    size_t namelen = strlen(entry->d_name);
-    if (namelen < 6 || strcmp(entry->d_name + namelen - 5, ".json") != 0)
-      continue;
-
-    char filepath[768];
-    snprintf(filepath, sizeof(filepath), "%s/%s", dir, entry->d_name);
-
-    char *content = read_file_contents(filepath, NULL);
-    if (!content)
-      continue;
-
-    char *chat_title = find_json_string(content, "title");
-    if (chat_title && strcmp(chat_title, title) == 0) {
-      char *chat_id = find_json_string(content, "id");
-      if (chat_id) {
-        found_id = chat_id;
-      }
-      free(chat_title);
-      free(content);
-      break;
-    }
-    if (chat_title)
-      free(chat_title);
-    free(content);
-  }
-
-  closedir(d);
-  return found_id;
-}
-
-bool chat_load(ChatHistory *history, const char *id_or_title,
-               char *out_character_path, size_t path_size) {
-  const char *dir = get_chats_dir();
-  if (!dir)
-    return false;
-
-  char filepath[768];
-  snprintf(filepath, sizeof(filepath), "%s/%s.json", dir, id_or_title);
-
+static bool try_load_chat_from_path(ChatHistory *history, const char *filepath,
+                                    char *out_character_path,
+                                    size_t path_size) {
   char *content = read_file_contents(filepath, NULL);
-
-  char *found_id = NULL;
-  if (!content) {
-    found_id = find_chat_id_by_title(id_or_title);
-    if (found_id) {
-      snprintf(filepath, sizeof(filepath), "%s/%s.json", dir, found_id);
-      content = read_file_contents(filepath, NULL);
-    }
-  }
-
-  if (!content) {
-    if (found_id)
-      free(found_id);
+  if (!content)
     return false;
-  }
-
-  if (found_id)
-    free(found_id);
 
   if (out_character_path && path_size > 0) {
     out_character_path[0] = '\0';
@@ -560,13 +621,98 @@ bool chat_load(ChatHistory *history, const char *id_or_title,
   return true;
 }
 
-bool chat_delete(const char *id) {
-  const char *dir = get_chats_dir();
-  if (!dir)
+bool chat_load(ChatHistory *history, const char *id, const char *character_name,
+               char *out_character_path, size_t path_size) {
+  if (character_name && character_name[0]) {
+    char char_dir[768];
+    if (get_character_chats_dir(character_name, char_dir, sizeof(char_dir))) {
+      char filepath[1024];
+      snprintf(filepath, sizeof(filepath), "%s/%s.json", char_dir, id);
+      if (try_load_chat_from_path(history, filepath, out_character_path,
+                                  path_size)) {
+        return true;
+      }
+    }
+  }
+
+  const char *base_dir = get_chats_dir();
+  if (!base_dir)
     return false;
 
+  DIR *d = opendir(base_dir);
+  if (!d)
+    return false;
+
+  struct dirent *entry;
+  while ((entry = readdir(d)) != NULL) {
+    if (entry->d_name[0] == '.')
+      continue;
+
+    char subdir_path[768];
+    snprintf(subdir_path, sizeof(subdir_path), "%s/%s", base_dir,
+             entry->d_name);
+
+    struct stat st;
+    if (stat(subdir_path, &st) == 0 && S_ISDIR(st.st_mode)) {
+      char filepath[1024];
+      snprintf(filepath, sizeof(filepath), "%s/%s.json", subdir_path, id);
+      if (try_load_chat_from_path(history, filepath, out_character_path,
+                                  path_size)) {
+        closedir(d);
+        return true;
+      }
+    }
+  }
+  closedir(d);
+
   char filepath[768];
-  snprintf(filepath, sizeof(filepath), "%s/%s.json", dir, id);
+  snprintf(filepath, sizeof(filepath), "%s/%s.json", base_dir, id);
+  return try_load_chat_from_path(history, filepath, out_character_path,
+                                 path_size);
+}
+
+bool chat_delete(const char *id, const char *character_name) {
+  if (character_name && character_name[0]) {
+    char char_dir[768];
+    if (get_character_chats_dir(character_name, char_dir, sizeof(char_dir))) {
+      char filepath[1024];
+      snprintf(filepath, sizeof(filepath), "%s/%s.json", char_dir, id);
+      if (unlink(filepath) == 0)
+        return true;
+    }
+  }
+
+  const char *base_dir = get_chats_dir();
+  if (!base_dir)
+    return false;
+
+  DIR *d = opendir(base_dir);
+  if (!d)
+    return false;
+
+  struct dirent *entry;
+  while ((entry = readdir(d)) != NULL) {
+    if (entry->d_name[0] == '.')
+      continue;
+
+    char subdir_path[768];
+    snprintf(subdir_path, sizeof(subdir_path), "%s/%s", base_dir,
+             entry->d_name);
+
+    struct stat st;
+    if (stat(subdir_path, &st) == 0 && S_ISDIR(st.st_mode)) {
+      char filepath[1024];
+      snprintf(filepath, sizeof(filepath), "%s/%s.json", subdir_path, id);
+      if (unlink(filepath) == 0) {
+        closedir(d);
+        return true;
+      }
+    }
+  }
+  closedir(d);
+
+  char filepath[768];
+  snprintf(filepath, sizeof(filepath), "%s/%s.json", base_dir, id);
   return unlink(filepath) == 0;
 }
 
@@ -579,108 +725,298 @@ char *chat_generate_id(void) {
 }
 
 const char *chat_auto_title(const ChatHistory *history) {
+  (void)history; // unused
   static char title[CHAT_TITLE_MAX];
-
-  for (size_t i = 0; i < history->count; i++) {
-    const char *msg = history_get(history, i);
-    if (!msg)
-      continue;
-    if (strncmp(msg, "You: ", 5) == 0) {
-      const char *content = msg + 5;
-      size_t len = strlen(content);
-      if (len > CHAT_TITLE_MAX - 4) {
-        strncpy(title, content, CHAT_TITLE_MAX - 4);
-        title[CHAT_TITLE_MAX - 4] = '\0';
-        strcat(title, "...");
-      } else {
-        strncpy(title, content, CHAT_TITLE_MAX - 1);
-        title[CHAT_TITLE_MAX - 1] = '\0';
-      }
-      return title;
-    }
-  }
-
   time_t now = time(NULL);
   struct tm *t = localtime(&now);
   strftime(title, sizeof(title), "Chat %Y-%m-%d %H:%M", t);
   return title;
 }
 
-bool chat_find_by_title(const char *title, char *out_id, size_t id_size) {
+int chat_get_next_index(const char *character_name) {
+  ChatList list;
+  chat_list_init(&list);
+  if (!chat_list_load_for_character(&list, character_name)) {
+    return 1;
+  }
+
+  int max_index = 0;
+  for (size_t i = 0; i < list.count; i++) {
+    int idx = 0;
+    if (sscanf(list.chats[i].title, "Chat %d", &idx) == 1) {
+      if (idx > max_index)
+        max_index = idx;
+    }
+  }
+
+  chat_list_free(&list);
+  return max_index + 1;
+}
+
+bool chat_find_by_title(const char *title, const char *character_name,
+                        char *out_id, size_t id_size) {
   if (!title || !out_id || id_size == 0)
     return false;
 
-  const char *dir = get_chats_dir();
-  if (!dir)
+  ChatList list;
+  chat_list_init(&list);
+  if (!chat_list_load_for_character(&list, character_name)) {
+    return false;
+  }
+
+  bool found = false;
+  for (size_t i = 0; i < list.count; i++) {
+    if (strcmp(list.chats[i].title, title) == 0) {
+      strncpy(out_id, list.chats[i].id, id_size - 1);
+      out_id[id_size - 1] = '\0';
+      found = true;
+      break;
+    }
+  }
+
+  chat_list_free(&list);
+  return found;
+}
+
+bool chat_get_title_by_id(const char *id, const char *character_name,
+                          char *out_title, size_t title_size) {
+  if (!id || !out_title || title_size == 0)
     return false;
 
-  DIR *d = opendir(dir);
+  ChatList list;
+  chat_list_init(&list);
+  if (!chat_list_load_for_character(&list, character_name)) {
+    return false;
+  }
+
+  bool found = false;
+  for (size_t i = 0; i < list.count; i++) {
+    if (strcmp(list.chats[i].id, id) == 0) {
+      strncpy(out_title, list.chats[i].title, title_size - 1);
+      out_title[title_size - 1] = '\0';
+      found = true;
+      break;
+    }
+  }
+
+  chat_list_free(&list);
+  return found;
+}
+
+bool chat_auto_save(const ChatHistory *history, char *chat_id, size_t id_size,
+                    const char *character_path, const char *character_name) {
+  if (!history || !chat_id || id_size == 0)
+    return false;
+
+  if (history->count == 0)
+    return false;
+
+  bool is_new = (chat_id[0] == '\0');
+  char title[CHAT_TITLE_MAX];
+
+  if (is_new) {
+    char *new_id = chat_generate_id();
+    strncpy(chat_id, new_id, id_size - 1);
+    chat_id[id_size - 1] = '\0';
+
+    int next_index = chat_get_next_index(character_name);
+    snprintf(title, sizeof(title), "Chat %d", next_index);
+  } else {
+    if (!chat_get_title_by_id(chat_id, character_name, title, sizeof(title))) {
+      snprintf(title, sizeof(title), "Chat");
+    }
+  }
+
+  return chat_save(history, chat_id, title, character_path, character_name);
+}
+
+void chat_character_list_init(ChatCharacterList *list) {
+  list->characters = NULL;
+  list->count = 0;
+  list->capacity = 0;
+}
+
+void chat_character_list_free(ChatCharacterList *list) {
+  free(list->characters);
+  list->characters = NULL;
+  list->count = 0;
+  list->capacity = 0;
+}
+
+bool chat_character_list_load(ChatCharacterList *list) {
+  chat_character_list_free(list);
+  chat_character_list_init(list);
+
+  const char *base_dir = get_chats_dir();
+  if (!base_dir)
+    return false;
+
+  DIR *d = opendir(base_dir);
   if (!d)
     return false;
 
-  bool found = false;
   struct dirent *entry;
   while ((entry = readdir(d)) != NULL) {
     if (entry->d_name[0] == '.')
       continue;
 
-    size_t namelen = strlen(entry->d_name);
-    if (namelen < 6 || strcmp(entry->d_name + namelen - 5, ".json") != 0)
+    char subdir_path[768];
+    snprintf(subdir_path, sizeof(subdir_path), "%s/%s", base_dir,
+             entry->d_name);
+
+    struct stat st;
+    if (stat(subdir_path, &st) != 0 || !S_ISDIR(st.st_mode))
       continue;
 
-    char filepath[768];
-    snprintf(filepath, sizeof(filepath), "%s/%s", dir, entry->d_name);
-
-    char *content = read_file_contents(filepath, NULL);
-    if (!content)
+    DIR *char_d = opendir(subdir_path);
+    if (!char_d)
       continue;
 
-    char *chat_title = find_json_string(content, "title");
-    if (chat_title && strcmp(chat_title, title) == 0) {
-      char *chat_id = find_json_string(content, "id");
-      if (chat_id) {
-        strncpy(out_id, chat_id, id_size - 1);
-        out_id[id_size - 1] = '\0';
-        free(chat_id);
-        found = true;
+    size_t chat_count = 0;
+    struct dirent *chat_entry;
+    while ((chat_entry = readdir(char_d)) != NULL) {
+      if (chat_entry->d_name[0] == '.')
+        continue;
+      size_t namelen = strlen(chat_entry->d_name);
+      if (namelen >= 6 &&
+          strcmp(chat_entry->d_name + namelen - 5, ".json") == 0) {
+        chat_count++;
       }
-      free(chat_title);
-      free(content);
-      break;
     }
-    if (chat_title)
-      free(chat_title);
-    free(content);
+    closedir(char_d);
+
+    if (chat_count == 0)
+      continue;
+
+    if (list->count >= list->capacity) {
+      size_t newcap = list->capacity == 0 ? 8 : list->capacity * 2;
+      ChatCharacter *tmp =
+          realloc(list->characters, newcap * sizeof(ChatCharacter));
+      if (!tmp)
+        continue;
+      list->characters = tmp;
+      list->capacity = newcap;
+    }
+
+    ChatCharacter *ch = &list->characters[list->count];
+    strncpy(ch->dirname, entry->d_name, CHAT_CHAR_NAME_MAX - 1);
+    ch->dirname[CHAT_CHAR_NAME_MAX - 1] = '\0';
+
+    char first_chat_path[1024] = {0};
+    char_d = opendir(subdir_path);
+    if (char_d) {
+      while ((chat_entry = readdir(char_d)) != NULL) {
+        if (chat_entry->d_name[0] == '.')
+          continue;
+        size_t namelen = strlen(chat_entry->d_name);
+        if (namelen >= 6 &&
+            strcmp(chat_entry->d_name + namelen - 5, ".json") == 0) {
+          snprintf(first_chat_path, sizeof(first_chat_path), "%s/%s",
+                   subdir_path, chat_entry->d_name);
+          break;
+        }
+      }
+      closedir(char_d);
+    }
+
+    ch->name[0] = '\0';
+    if (first_chat_path[0]) {
+      char *content = read_file_contents(first_chat_path, NULL);
+      if (content) {
+        char *name = find_json_string(content, "character_name");
+        if (name) {
+          strncpy(ch->name, name, CHAT_CHAR_NAME_MAX - 1);
+          ch->name[CHAT_CHAR_NAME_MAX - 1] = '\0';
+          free(name);
+        }
+        free(content);
+      }
+    }
+
+    if (!ch->name[0]) {
+      strncpy(ch->name, ch->dirname, CHAT_CHAR_NAME_MAX - 1);
+      ch->name[CHAT_CHAR_NAME_MAX - 1] = '\0';
+    }
+
+    ch->chat_count = chat_count;
+    list->count++;
   }
 
   closedir(d);
-  return found;
-}
 
-bool chat_get_title_by_id(const char *id, char *out_title, size_t title_size) {
-  if (!id || !out_title || title_size == 0)
-    return false;
-
-  const char *dir = get_chats_dir();
-  if (!dir)
-    return false;
-
-  char filepath[768];
-  snprintf(filepath, sizeof(filepath), "%s/%s.json", dir, id);
-
-  char *content = read_file_contents(filepath, NULL);
-  if (!content)
-    return false;
-
-  char *title = find_json_string(content, "title");
-  if (title) {
-    strncpy(out_title, title, title_size - 1);
-    out_title[title_size - 1] = '\0';
-    free(title);
-    free(content);
-    return true;
+  for (size_t i = 0; i < list->count; i++) {
+    for (size_t j = i + 1; j < list->count; j++) {
+      if (strcasecmp(list->characters[j].name, list->characters[i].name) < 0) {
+        ChatCharacter tmp = list->characters[i];
+        list->characters[i] = list->characters[j];
+        list->characters[j] = tmp;
+      }
+    }
   }
 
-  free(content);
-  return false;
+  return true;
+}
+
+bool chat_load_latest(ChatHistory *history, const char *character_name,
+                      char *out_character_path, size_t path_size,
+                      char *out_chat_id, size_t id_size) {
+  ChatList list;
+  chat_list_init(&list);
+  if (!chat_list_load_for_character(&list, character_name) || list.count == 0) {
+    chat_list_free(&list);
+    return false;
+  }
+
+  const char *id = list.chats[0].id;
+  bool result =
+      chat_load(history, id, character_name, out_character_path, path_size);
+
+  if (result && out_chat_id && id_size > 0) {
+    strncpy(out_chat_id, id, id_size - 1);
+    out_chat_id[id_size - 1] = '\0';
+  }
+
+  chat_list_free(&list);
+  return result;
+}
+
+bool chat_load_by_index(ChatHistory *history, const char *character_name,
+                        int index, char *out_character_path, size_t path_size,
+                        char *out_chat_id, size_t id_size) {
+  if (index < 1)
+    return false;
+
+  ChatList list;
+  chat_list_init(&list);
+  if (!chat_list_load_for_character(&list, character_name)) {
+    chat_list_free(&list);
+    return false;
+  }
+
+  char target_title[32];
+  snprintf(target_title, sizeof(target_title), "Chat %d", index);
+
+  const char *id = NULL;
+  for (size_t i = 0; i < list.count; i++) {
+    if (strcmp(list.chats[i].title, target_title) == 0) {
+      id = list.chats[i].id;
+      break;
+    }
+  }
+
+  if (!id) {
+    chat_list_free(&list);
+    return false;
+  }
+
+  bool result =
+      chat_load(history, id, character_name, out_character_path, path_size);
+
+  if (result && out_chat_id && id_size > 0) {
+    strncpy(out_chat_id, id, id_size - 1);
+    out_chat_id[id_size - 1] = '\0';
+  }
+
+  chat_list_free(&list);
+  return result;
 }

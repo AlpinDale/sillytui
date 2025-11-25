@@ -104,7 +104,8 @@ void modal_open_chat_list(Modal *m) {
 }
 
 void modal_open_chat_save(Modal *m, const char *current_id,
-                          const char *character_path) {
+                          const char *character_path,
+                          const char *character_name) {
   modal_close(m);
   m->type = MODAL_CHAT_SAVE;
   m->field_index = 0;
@@ -122,6 +123,11 @@ void modal_open_chat_save(Modal *m, const char *current_id,
     strncpy(m->character_path, character_path, CHAT_CHAR_PATH_MAX - 1);
   } else {
     m->character_path[0] = '\0';
+  }
+  if (character_name && character_name[0]) {
+    strncpy(m->character_name, character_name, CHAT_CHAR_NAME_MAX - 1);
+  } else {
+    m->character_name[0] = '\0';
   }
   create_window(m, 10, 50);
 }
@@ -1130,7 +1136,10 @@ ModalResult modal_handle_key(Modal *m, int ch, ModelsFile *mf,
     if (ch == '\n' || ch == '\r') {
       if (m->chat_list.count > 0 && history) {
         const char *id = m->chat_list.chats[m->list_selection].id;
-        if (chat_load(history, id, loaded_char_path, char_path_size)) {
+        const char *char_name =
+            m->chat_list.chats[m->list_selection].character_name;
+        if (chat_load(history, id, char_name, loaded_char_path,
+                      char_path_size)) {
           if (loaded_chat_id) {
             strncpy(loaded_chat_id, id, CHAT_ID_MAX - 1);
             loaded_chat_id[CHAT_ID_MAX - 1] = '\0';
@@ -1146,7 +1155,9 @@ ModalResult modal_handle_key(Modal *m, int ch, ModelsFile *mf,
     if (ch == 'd' || ch == KEY_DC) {
       if (m->chat_list.count > 0) {
         const char *id = m->chat_list.chats[m->list_selection].id;
-        chat_delete(id);
+        const char *char_name =
+            m->chat_list.chats[m->list_selection].character_name;
+        chat_delete(id, char_name);
         chat_list_load(&m->chat_list);
         if (m->list_selection >= (int)m->chat_list.count &&
             m->list_selection > 0) {
@@ -1187,7 +1198,8 @@ ModalResult modal_handle_key(Modal *m, int ch, ModelsFile *mf,
         if (m->fields[0][0]) {
           title = m->fields[0];
         } else if (m->current_chat_id[0] &&
-                   chat_get_title_by_id(m->current_chat_id, existing_title,
+                   chat_get_title_by_id(m->current_chat_id, m->character_name,
+                                        existing_title,
                                         sizeof(existing_title))) {
           title = existing_title;
         } else {
@@ -1195,8 +1207,8 @@ ModalResult modal_handle_key(Modal *m, int ch, ModelsFile *mf,
         }
 
         char existing_id[CHAT_ID_MAX] = {0};
-        bool title_exists =
-            chat_find_by_title(title, existing_id, sizeof(existing_id));
+        bool title_exists = chat_find_by_title(
+            title, m->character_name, existing_id, sizeof(existing_id));
 
         bool is_same_chat = m->current_chat_id[0] &&
                             strcmp(m->current_chat_id, existing_id) == 0;
@@ -1217,7 +1229,8 @@ ModalResult modal_handle_key(Modal *m, int ch, ModelsFile *mf,
         const char *id =
             m->current_chat_id[0] ? m->current_chat_id : chat_generate_id();
 
-        if (chat_save(history, id, title, m->character_path)) {
+        if (chat_save(history, id, title, m->character_path,
+                      m->character_name)) {
           if (loaded_chat_id) {
             strncpy(loaded_chat_id, id, CHAT_ID_MAX - 1);
             loaded_chat_id[CHAT_ID_MAX - 1] = '\0';
@@ -1250,10 +1263,11 @@ ModalResult modal_handle_key(Modal *m, int ch, ModelsFile *mf,
     }
     if (ch == '\n' || ch == '\r') {
       if (m->field_index == 0) {
-        chat_delete(m->existing_chat_id);
+        chat_delete(m->existing_chat_id, m->character_name);
 
         const char *id = m->existing_chat_id;
-        if (chat_save(history, id, m->pending_save_title, m->character_path)) {
+        if (chat_save(history, id, m->pending_save_title, m->character_path,
+                      m->character_name)) {
           if (loaded_chat_id) {
             strncpy(loaded_chat_id, id, CHAT_ID_MAX - 1);
             loaded_chat_id[CHAT_ID_MAX - 1] = '\0';

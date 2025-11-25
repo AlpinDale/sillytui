@@ -46,6 +46,7 @@ typedef struct {
   ChatList chat_list;
   char current_chat_id[CHAT_ID_MAX];
   char character_path[CHAT_CHAR_PATH_MAX];
+  char character_name[CHAT_CHAR_NAME_MAX];
 
   char pending_save_title[CHAT_TITLE_MAX];
   char existing_chat_id[CHAT_ID_MAX];
@@ -82,7 +83,8 @@ void modal_open_model_list(Modal *m, const ModelsFile *mf);
 void modal_open_message(Modal *m, const char *msg, bool is_error);
 void modal_open_chat_list(Modal *m);
 void modal_open_chat_save(Modal *m, const char *current_id,
-                          const char *character_path);
+                          const char *character_path,
+                          const char *character_name);
 void modal_open_exit_confirm(Modal *m);
 void modal_open_persona_edit(Modal *m, const Persona *persona);
 void modal_open_character_info(Modal *m, const CharacterCard *card);
