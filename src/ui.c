@@ -81,12 +81,35 @@ static void draw_title(WINDOW *win, const char *title, int color_pair) {
     wattroff(win, COLOR_PAIR(color_pair) | A_BOLD);
 }
 
-void ui_layout_windows(WINDOW **chat_win, WINDOW **input_win) {
+int ui_calc_input_height(const char *buffer, int win_width) {
+  if (!buffer || buffer[0] == '\0')
+    return 3;
+
+  int text_width = win_width - 6;
+  if (text_width < 10)
+    text_width = 10;
+
+  int lines = ui_get_input_line_count(buffer, text_width);
+  int height = lines + 2;
+
+  if (height < 3)
+    height = 3;
+  if (height > INPUT_MAX_LINES + 2)
+    height = INPUT_MAX_LINES + 2;
+
+  return height;
+}
+
+void ui_layout_windows_with_input(WINDOW **chat_win, WINDOW **input_win,
+                                  int input_height) {
   int rows, cols;
   getmaxyx(stdscr, rows, cols);
-  int input_height = 3;
-  if (rows < 6)
-    input_height = 1;
+
+  if (input_height < 3)
+    input_height = 3;
+  if (input_height > rows - 3)
+    input_height = rows - 3;
+
   int chat_height = rows - input_height;
   if (chat_height < 3)
     chat_height = 3;
@@ -552,15 +575,101 @@ void ui_draw_chat(WINDOW *chat_win, const ChatHistory *history,
   wrefresh(chat_win);
 }
 
-void ui_draw_input(WINDOW *input_win, const char *buffer, int cursor_pos,
-                   bool focused) {
+int ui_get_input_line_count(const char *buffer, int text_width) {
+  if (!buffer || buffer[0] == '\0')
+    return 1;
+
+  int lines = 1;
+  int col = 0;
+  for (const char *p = buffer; *p; p++) {
+    if (*p == '\n') {
+      lines++;
+      col = 0;
+    } else {
+      col++;
+      if (col >= text_width) {
+        lines++;
+        col = 0;
+      }
+    }
+  }
+  return lines;
+}
+
+InputCursorPos ui_cursor_to_line_col(const char *buffer, int cursor_pos,
+                                     int text_width) {
+  InputCursorPos pos = {0, 0};
+  if (!buffer)
+    return pos;
+
+  int line = 0;
+  int col = 0;
+  for (int i = 0; i < cursor_pos && buffer[i]; i++) {
+    if (buffer[i] == '\n') {
+      line++;
+      col = 0;
+    } else {
+      col++;
+      if (col >= text_width) {
+        line++;
+        col = 0;
+      }
+    }
+  }
+  pos.line = line;
+  pos.col = col;
+  return pos;
+}
+
+int ui_line_col_to_cursor(const char *buffer, int target_line, int target_col,
+                          int text_width) {
+  if (!buffer)
+    return 0;
+
+  int line = 0;
+  int col = 0;
+  int cursor = 0;
+
+  for (int i = 0; buffer[i]; i++) {
+    if (line == target_line && col == target_col)
+      return i;
+
+    if (line > target_line)
+      return cursor;
+
+    if (buffer[i] == '\n') {
+      if (line == target_line)
+        return i;
+      line++;
+      col = 0;
+      cursor = i + 1;
+    } else {
+      col++;
+      if (col >= text_width) {
+        if (line == target_line && col > target_col)
+          return i;
+        line++;
+        col = 0;
+        cursor = i + 1;
+      }
+    }
+  }
+
+  return (int)strlen(buffer);
+}
+
+void ui_draw_input_multiline(WINDOW *input_win, const char *buffer,
+                             int cursor_pos, bool focused, int scroll_line) {
   werase(input_win);
   draw_rounded_box(input_win, COLOR_PAIR_BORDER, focused);
 
   int h, w;
   getmaxyx(input_win, h, w);
-  (void)h;
   int buf_len = (int)strlen(buffer);
+  int text_width = w - 6;
+  if (text_width < 10)
+    text_width = 10;
+  int visible_lines = h - 2;
 
   if (focused) {
     if (g_ui_colors)
@@ -576,27 +685,99 @@ void ui_draw_input(WINDOW *input_win, const char *buffer, int cursor_pos,
       wattroff(input_win, COLOR_PAIR(COLOR_PAIR_HINT));
   }
 
-  mvwprintw(input_win, 1, 4, "%s", buffer);
-
-  if (focused) {
-    int screen_cursor = 4 + cursor_pos;
-    wattron(input_win, A_REVERSE);
-    char under_cursor = (cursor_pos < buf_len) ? buffer[cursor_pos] : ' ';
-    mvwaddch(input_win, 1, screen_cursor, under_cursor);
-    wattroff(input_win, A_REVERSE);
+  if (buffer[0] == '\0') {
+    if (g_ui_colors) {
+      wattron(input_win, COLOR_PAIR(COLOR_PAIR_HINT) | A_DIM);
+      mvwaddstr(input_win, 1, 4, "Type a message or / for commands...");
+      wattroff(input_win, COLOR_PAIR(COLOR_PAIR_HINT) | A_DIM);
+    }
+    if (focused) {
+      wattron(input_win, A_REVERSE);
+      mvwaddch(input_win, 1, 4, ' ');
+      wattroff(input_win, A_REVERSE);
+    }
+    wrefresh(input_win);
+    return;
   }
 
-  if (buffer[0] == '\0' && g_ui_colors) {
-    wattron(input_win, COLOR_PAIR(COLOR_PAIR_HINT) | A_DIM);
-    mvwaddstr(input_win, 1, 5, "Type a message or / for commands...");
-    wattroff(input_win, COLOR_PAIR(COLOR_PAIR_HINT) | A_DIM);
+  int total_lines = ui_get_input_line_count(buffer, text_width);
+  InputCursorPos cursor_lc =
+      ui_cursor_to_line_col(buffer, cursor_pos, text_width);
+
+  if (scroll_line > cursor_lc.line)
+    scroll_line = cursor_lc.line;
+  if (scroll_line < cursor_lc.line - visible_lines + 1)
+    scroll_line = cursor_lc.line - visible_lines + 1;
+  if (scroll_line < 0)
+    scroll_line = 0;
+
+  int line = 0;
+  int col = 0;
+  int screen_line = 0;
+  const char *p = buffer;
+  int char_idx = 0;
+
+  while (line < scroll_line && *p) {
+    if (*p == '\n') {
+      line++;
+      col = 0;
+    } else {
+      col++;
+      if (col >= text_width) {
+        line++;
+        col = 0;
+      }
+    }
+    p++;
+    char_idx++;
   }
 
-  if (g_ui_colors)
-    wattron(input_win, COLOR_PAIR(COLOR_PAIR_HINT) | A_DIM);
-  mvwaddstr(input_win, 1, w - 14, "↑↓ navigate");
-  if (g_ui_colors)
-    wattroff(input_win, COLOR_PAIR(COLOR_PAIR_HINT) | A_DIM);
+  col = 0;
+  while (*p && screen_line < visible_lines) {
+    int y = 1 + screen_line;
+    int x = 4 + col;
+
+    if (focused && char_idx == cursor_pos) {
+      wattron(input_win, A_REVERSE);
+      mvwaddch(input_win, y, x, *p == '\n' ? ' ' : *p);
+      wattroff(input_win, A_REVERSE);
+    } else if (*p != '\n') {
+      mvwaddch(input_win, y, x, *p);
+    }
+
+    if (*p == '\n') {
+      screen_line++;
+      col = 0;
+    } else {
+      col++;
+      if (col >= text_width) {
+        screen_line++;
+        col = 0;
+      }
+    }
+    p++;
+    char_idx++;
+  }
+
+  if (focused && cursor_pos >= buf_len) {
+    int cursor_screen_line = cursor_lc.line - scroll_line;
+    if (cursor_screen_line >= 0 && cursor_screen_line < visible_lines) {
+      wattron(input_win, A_REVERSE);
+      mvwaddch(input_win, 1 + cursor_screen_line, 4 + cursor_lc.col, ' ');
+      wattroff(input_win, A_REVERSE);
+    }
+  }
+
+  if (total_lines > visible_lines) {
+    if (g_ui_colors)
+      wattron(input_win, COLOR_PAIR(COLOR_PAIR_HINT) | A_DIM);
+    if (scroll_line > 0)
+      mvwaddstr(input_win, 0, w / 2, "▲");
+    if (scroll_line + visible_lines < total_lines)
+      mvwaddstr(input_win, h - 1, w / 2, "▼");
+    if (g_ui_colors)
+      wattroff(input_win, COLOR_PAIR(COLOR_PAIR_HINT) | A_DIM);
+  }
 
   wrefresh(input_win);
 }

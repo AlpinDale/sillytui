@@ -20,7 +20,7 @@
 #include "persona.h"
 #include "ui.h"
 
-#define INPUT_MAX 256
+#define INPUT_MAX 4096
 
 static const char *SPINNER_FRAMES[] = {"thinking", "thinking.", "thinking..",
                                        "thinking..."};
@@ -91,7 +91,7 @@ static void stream_callback(const char *chunk, void *userdata) {
   *ctx->selected_msg = MSG_SELECT_NONE;
   ui_draw_chat(ctx->chat_win, ctx->history, *ctx->selected_msg, ctx->model_name,
                ctx->user_name, ctx->bot_name);
-  ui_draw_input(ctx->input_win, "", 0, true);
+  ui_draw_input_multiline(ctx->input_win, "", 0, true, 0);
 }
 
 static void progress_callback(void *userdata) {
@@ -111,7 +111,7 @@ static void progress_callback(void *userdata) {
   history_update(ctx->history, ctx->msg_index, display);
   ui_draw_chat(ctx->chat_win, ctx->history, *ctx->selected_msg, ctx->model_name,
                ctx->user_name, ctx->bot_name);
-  ui_draw_input(ctx->input_win, "", 0, true);
+  ui_draw_input_multiline(ctx->input_win, "", 0, true, 0);
 }
 
 static const char *get_model_name(ModelsFile *mf) {
@@ -150,7 +150,7 @@ static void do_llm_reply(ChatHistory *history, WINDOW *chat_win,
   *selected_msg = MSG_SELECT_NONE;
   ui_draw_chat(chat_win, history, *selected_msg, model_name, user_name,
                bot_name);
-  ui_draw_input(input_win, "", 0, true);
+  ui_draw_input_multiline(input_win, "", 0, true, 0);
 
   StreamContext ctx = {.history = history,
                        .chat_win = chat_win,
@@ -453,9 +453,11 @@ int main(void) {
   markdown_init_colors();
   ui_init_colors();
 
+  int current_input_height = 3;
+
   WINDOW *chat_win = NULL;
   WINDOW *input_win = NULL;
-  ui_layout_windows(&chat_win, &input_win);
+  ui_layout_windows_with_input(&chat_win, &input_win, current_input_height);
 
   Modal modal;
   modal_init(&modal);
@@ -466,6 +468,7 @@ int main(void) {
   char input_buffer[INPUT_MAX] = {0};
   int input_len = 0;
   int cursor_pos = 0;
+  int input_scroll_line = 0;
   int selected_msg = MSG_SELECT_NONE;
   bool input_focused = true;
   bool running = true;
@@ -483,7 +486,8 @@ int main(void) {
   const char *bot_disp = get_bot_display_name(&character, character_loaded);
   ui_draw_chat(chat_win, &history, selected_msg, get_model_name(&models),
                user_disp, bot_disp);
-  ui_draw_input(input_win, input_buffer, cursor_pos, input_focused);
+  ui_draw_input_multiline(input_win, input_buffer, cursor_pos, input_focused,
+                          input_scroll_line);
 
   while (running) {
     user_disp = get_user_display_name(&persona);
@@ -492,12 +496,13 @@ int main(void) {
     int ch = wgetch(active_win);
 
     if (ch == KEY_RESIZE) {
-      ui_layout_windows(&chat_win, &input_win);
+      ui_layout_windows_with_input(&chat_win, &input_win, current_input_height);
       selected_msg = MSG_SELECT_NONE;
       input_focused = true;
       ui_draw_chat(chat_win, &history, selected_msg, get_model_name(&models),
                    user_disp, bot_disp);
-      ui_draw_input(input_win, input_buffer, cursor_pos, input_focused);
+      ui_draw_input_multiline(input_win, input_buffer, cursor_pos,
+                              input_focused, input_scroll_line);
       if (modal_is_open(&modal)) {
         modal_close(&modal);
       }
@@ -568,7 +573,8 @@ int main(void) {
         touchwin(input_win);
         ui_draw_chat(chat_win, &history, selected_msg, get_model_name(&models),
                      user_disp, bot_disp);
-        ui_draw_input(input_win, input_buffer, cursor_pos, input_focused);
+        ui_draw_input_multiline(input_win, input_buffer, cursor_pos,
+                                input_focused, input_scroll_line);
       }
       continue;
     }
@@ -615,7 +621,8 @@ int main(void) {
         touchwin(chat_win);
         ui_draw_chat(chat_win, &history, selected_msg, get_model_name(&models),
                      user_disp, bot_disp);
-        ui_draw_input(input_win, input_buffer, cursor_pos, input_focused);
+        ui_draw_input_multiline(input_win, input_buffer, cursor_pos,
+                                input_focused, input_scroll_line);
         if (ch == '\n' || ch == '\r') {
           goto process_enter;
         }
@@ -624,6 +631,22 @@ int main(void) {
     }
 
     if (ch == KEY_UP) {
+      if (input_focused && input_len > 0) {
+        int text_width = getmaxx(input_win) - 6;
+        if (text_width < 10)
+          text_width = 10;
+        InputCursorPos cur =
+            ui_cursor_to_line_col(input_buffer, cursor_pos, text_width);
+        if (cur.line > 0) {
+          cursor_pos = ui_line_col_to_cursor(input_buffer, cur.line - 1,
+                                             cur.col, text_width);
+          if (cur.line - 1 < input_scroll_line)
+            input_scroll_line = cur.line - 1;
+          ui_draw_input_multiline(input_win, input_buffer, cursor_pos,
+                                  input_focused, input_scroll_line);
+          continue;
+        }
+      }
       if (history.count == 0)
         continue;
       if (input_focused) {
@@ -634,11 +657,30 @@ int main(void) {
       }
       ui_draw_chat(chat_win, &history, selected_msg, get_model_name(&models),
                    user_disp, bot_disp);
-      ui_draw_input(input_win, input_buffer, cursor_pos, input_focused);
+      ui_draw_input_multiline(input_win, input_buffer, cursor_pos,
+                              input_focused, input_scroll_line);
       continue;
     }
 
     if (ch == KEY_DOWN) {
+      if (input_focused && input_len > 0) {
+        int text_width = getmaxx(input_win) - 6;
+        if (text_width < 10)
+          text_width = 10;
+        InputCursorPos cur =
+            ui_cursor_to_line_col(input_buffer, cursor_pos, text_width);
+        int total_lines = ui_get_input_line_count(input_buffer, text_width);
+        if (cur.line < total_lines - 1) {
+          cursor_pos = ui_line_col_to_cursor(input_buffer, cur.line + 1,
+                                             cur.col, text_width);
+          int visible_lines = getmaxy(input_win) - 2;
+          if (cur.line + 1 >= input_scroll_line + visible_lines)
+            input_scroll_line = cur.line + 2 - visible_lines;
+          ui_draw_input_multiline(input_win, input_buffer, cursor_pos,
+                                  input_focused, input_scroll_line);
+          continue;
+        }
+      }
       if (selected_msg == MSG_SELECT_NONE)
         continue;
       if (selected_msg < (int)history.count - 1) {
@@ -649,14 +691,16 @@ int main(void) {
       }
       ui_draw_chat(chat_win, &history, selected_msg, get_model_name(&models),
                    user_disp, bot_disp);
-      ui_draw_input(input_win, input_buffer, cursor_pos, input_focused);
+      ui_draw_input_multiline(input_win, input_buffer, cursor_pos,
+                              input_focused, input_scroll_line);
       continue;
     }
 
     if (ch == KEY_LEFT) {
       if (cursor_pos > 0 && input_focused) {
         cursor_pos--;
-        ui_draw_input(input_win, input_buffer, cursor_pos, input_focused);
+        ui_draw_input_multiline(input_win, input_buffer, cursor_pos,
+                                input_focused, input_scroll_line);
       }
       continue;
     }
@@ -664,20 +708,23 @@ int main(void) {
     if (ch == KEY_RIGHT) {
       if (cursor_pos < input_len && input_focused) {
         cursor_pos++;
-        ui_draw_input(input_win, input_buffer, cursor_pos, input_focused);
+        ui_draw_input_multiline(input_win, input_buffer, cursor_pos,
+                                input_focused, input_scroll_line);
       }
       continue;
     }
 
     if (ch == KEY_HOME || ch == 1) {
       cursor_pos = 0;
-      ui_draw_input(input_win, input_buffer, cursor_pos, input_focused);
+      ui_draw_input_multiline(input_win, input_buffer, cursor_pos,
+                              input_focused, input_scroll_line);
       continue;
     }
 
     if (ch == KEY_END || ch == 5) {
       cursor_pos = input_len;
-      ui_draw_input(input_win, input_buffer, cursor_pos, input_focused);
+      ui_draw_input_multiline(input_win, input_buffer, cursor_pos,
+                              input_focused, input_scroll_line);
       continue;
     }
 
@@ -690,7 +737,8 @@ int main(void) {
         input_focused = true;
         ui_draw_chat(chat_win, &history, selected_msg, get_model_name(&models),
                      user_disp, bot_disp);
-        ui_draw_input(input_win, input_buffer, cursor_pos, input_focused);
+        ui_draw_input_multiline(input_win, input_buffer, cursor_pos,
+                                input_focused, input_scroll_line);
         continue;
       }
 
@@ -698,7 +746,8 @@ int main(void) {
         input_buffer[0] = '\0';
         input_len = 0;
         cursor_pos = 0;
-        ui_draw_input(input_win, input_buffer, cursor_pos, input_focused);
+        ui_draw_input_multiline(input_win, input_buffer, cursor_pos,
+                                input_focused, input_scroll_line);
         continue;
       }
 
@@ -716,18 +765,26 @@ int main(void) {
           input_buffer[0] = '\0';
           input_len = 0;
           cursor_pos = 0;
+          input_scroll_line = 0;
+          if (current_input_height != 3) {
+            current_input_height = 3;
+            ui_layout_windows_with_input(&chat_win, &input_win,
+                                         current_input_height);
+          }
           user_disp = get_user_display_name(&persona);
           bot_disp = get_bot_display_name(&character, character_loaded);
           if (modal_is_open(&modal)) {
             modal_draw(&modal, &models);
-            ui_draw_input(input_win, input_buffer, cursor_pos, input_focused);
+            ui_draw_input_multiline(input_win, input_buffer, cursor_pos,
+                                    input_focused, input_scroll_line);
           } else {
             selected_msg = MSG_SELECT_NONE;
             input_focused = true;
             touchwin(chat_win);
             ui_draw_chat(chat_win, &history, selected_msg,
                          get_model_name(&models), user_disp, bot_disp);
-            ui_draw_input(input_win, input_buffer, cursor_pos, input_focused);
+            ui_draw_input_multiline(input_win, input_buffer, cursor_pos,
+                                    input_focused, input_scroll_line);
           }
           continue;
         }
@@ -742,6 +799,12 @@ int main(void) {
       input_buffer[0] = '\0';
       input_len = 0;
       cursor_pos = 0;
+      input_scroll_line = 0;
+      if (current_input_height != 3) {
+        current_input_height = 3;
+        ui_layout_windows_with_input(&chat_win, &input_win,
+                                     current_input_height);
+      }
 
       if (history_add(&history, user_line) != SIZE_MAX) {
         selected_msg = MSG_SELECT_NONE;
@@ -749,7 +812,8 @@ int main(void) {
         ui_draw_chat(chat_win, &history, selected_msg, get_model_name(&models),
                      user_disp, bot_disp);
       }
-      ui_draw_input(input_win, input_buffer, cursor_pos, input_focused);
+      ui_draw_input_multiline(input_win, input_buffer, cursor_pos,
+                              input_focused, input_scroll_line);
 
       LLMContext llm_ctx = {.character = character_loaded ? &character : NULL,
                             .persona = &persona};
@@ -766,7 +830,19 @@ int main(void) {
                 input_len - cursor_pos + 1);
         input_len--;
         cursor_pos--;
-        ui_draw_input(input_win, input_buffer, cursor_pos, input_focused);
+
+        int new_height = ui_calc_input_height(input_buffer, getmaxx(input_win));
+        if (new_height != current_input_height) {
+          current_input_height = new_height;
+          ui_layout_windows_with_input(&chat_win, &input_win,
+                                       current_input_height);
+          input_scroll_line = 0;
+          ui_draw_chat(chat_win, &history, selected_msg,
+                       get_model_name(&models), user_disp, bot_disp);
+        }
+
+        ui_draw_input_multiline(input_win, input_buffer, cursor_pos,
+                                input_focused, input_scroll_line);
 
         int input_y = getbegy(input_win);
         int input_x = getbegx(input_win);
@@ -790,7 +866,19 @@ int main(void) {
         memmove(&input_buffer[cursor_pos], &input_buffer[cursor_pos + 1],
                 input_len - cursor_pos);
         input_len--;
-        ui_draw_input(input_win, input_buffer, cursor_pos, input_focused);
+
+        int new_height = ui_calc_input_height(input_buffer, getmaxx(input_win));
+        if (new_height != current_input_height) {
+          current_input_height = new_height;
+          ui_layout_windows_with_input(&chat_win, &input_win,
+                                       current_input_height);
+          input_scroll_line = 0;
+          ui_draw_chat(chat_win, &history, selected_msg,
+                       get_model_name(&models), user_disp, bot_disp);
+        }
+
+        ui_draw_input_multiline(input_win, input_buffer, cursor_pos,
+                                input_focused, input_scroll_line);
 
         int input_y = getbegy(input_win);
         int input_x = getbegx(input_win);
@@ -816,7 +904,24 @@ int main(void) {
       input_buffer[cursor_pos] = (char)ch;
       input_len++;
       cursor_pos++;
-      ui_draw_input(input_win, input_buffer, cursor_pos, input_focused);
+
+      int new_height = ui_calc_input_height(input_buffer, getmaxx(input_win));
+      if (new_height != current_input_height) {
+        current_input_height = new_height;
+        ui_layout_windows_with_input(&chat_win, &input_win,
+                                     current_input_height);
+        int text_width = getmaxx(input_win) - 6;
+        InputCursorPos cur =
+            ui_cursor_to_line_col(input_buffer, cursor_pos, text_width);
+        int visible_lines = getmaxy(input_win) - 2;
+        if (cur.line >= input_scroll_line + visible_lines)
+          input_scroll_line = cur.line - visible_lines + 1;
+        ui_draw_chat(chat_win, &history, selected_msg, get_model_name(&models),
+                     user_disp, bot_disp);
+      }
+
+      ui_draw_input_multiline(input_win, input_buffer, cursor_pos,
+                              input_focused, input_scroll_line);
 
       int input_y = getbegy(input_win);
       int input_x = getbegx(input_win);
