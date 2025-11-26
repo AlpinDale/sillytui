@@ -284,6 +284,18 @@ void modal_open_sampler_settings(Modal *m, ApiType api_type) {
   create_window(m, 24, 58);
 }
 
+void modal_open_sampler_yaml(Modal *m, SamplerSettings *sampler,
+                             ApiType api_type) {
+  modal_close(m);
+  m->type = MODAL_SAMPLER_YAML;
+  m->sampler = *sampler;
+  m->sampler_api_type = api_type;
+  m->sampler_yaml_buffer[0] = '\0';
+  m->sampler_yaml_cursor = 0;
+  m->sampler_yaml_scroll = 0;
+  create_window(m, 20, 60);
+}
+
 int modal_get_edit_msg_index(const Modal *m) { return m->edit_msg_index; }
 
 const char *modal_get_edit_content(const Modal *m) { return m->edit_buffer; }
@@ -1335,6 +1347,11 @@ static void draw_sampler_settings(Modal *m) {
   mvwprintw(w, m->height - 2, 12, "el");
 
   wattron(w, COLOR_PAIR(COLOR_PAIR_SWIPE));
+  mvwprintw(w, m->height - 2, 17, "y");
+  wattroff(w, COLOR_PAIR(COLOR_PAIR_SWIPE));
+  mvwprintw(w, m->height - 2, 18, "aml");
+
+  wattron(w, COLOR_PAIR(COLOR_PAIR_SWIPE));
   mvwprintw(w, m->height - 2, m->width - 14, "Tab");
   wattroff(w, COLOR_PAIR(COLOR_PAIR_SWIPE));
   mvwprintw(w, m->height - 2, m->width - 10, "save");
@@ -1743,6 +1760,130 @@ static void draw_sampler_settings(Modal *m) {
   wrefresh(w);
 }
 
+static void draw_sampler_yaml(Modal *m) {
+  WINDOW *w = m->win;
+  werase(w);
+  draw_box_fancy(w, m->height, m->width);
+  draw_title(w, m->width, "YAML Bulk Import");
+
+  int text_area_h = m->height - 6;
+  int text_area_w = m->width - 4;
+
+  int line_count = 1;
+  for (int i = 0; m->sampler_yaml_buffer[i]; i++) {
+    if (m->sampler_yaml_buffer[i] == '\n')
+      line_count++;
+  }
+
+  int visible_lines = text_area_h;
+  if (m->sampler_yaml_scroll > line_count - visible_lines)
+    m->sampler_yaml_scroll = line_count - visible_lines;
+  if (m->sampler_yaml_scroll < 0)
+    m->sampler_yaml_scroll = 0;
+
+  int cur_line = 0;
+  for (int i = 0; i < m->sampler_yaml_cursor && m->sampler_yaml_buffer[i];
+       i++) {
+    if (m->sampler_yaml_buffer[i] == '\n') {
+      cur_line++;
+    }
+  }
+
+  if (cur_line < m->sampler_yaml_scroll)
+    m->sampler_yaml_scroll = cur_line;
+  if (cur_line >= m->sampler_yaml_scroll + visible_lines)
+    m->sampler_yaml_scroll = cur_line - visible_lines + 1;
+
+  int line = 0;
+  int col = 0;
+  int buf_pos = 0;
+  while (m->sampler_yaml_buffer[buf_pos] && line < m->sampler_yaml_scroll) {
+    if (m->sampler_yaml_buffer[buf_pos] == '\n')
+      line++;
+    buf_pos++;
+  }
+
+  for (int y = 0; y < visible_lines; y++) {
+    int draw_y = 2 + y;
+    col = 0;
+
+    int line_num = m->sampler_yaml_scroll + y + 1;
+    if (line_num <= line_count) {
+      wattron(w, A_DIM);
+      mvwprintw(w, draw_y, 1, "%2d", line_num);
+      wattroff(w, A_DIM);
+    } else {
+      mvwprintw(w, draw_y, 1, "  ");
+    }
+    mvwaddstr(w, draw_y, 3, " ");
+
+    if (m->sampler_yaml_buffer[buf_pos]) {
+      while (m->sampler_yaml_buffer[buf_pos] &&
+             m->sampler_yaml_buffer[buf_pos] != '\n' && col < text_area_w - 4) {
+        char c = m->sampler_yaml_buffer[buf_pos];
+        if (buf_pos == m->sampler_yaml_cursor) {
+          wattron(w, A_REVERSE);
+          mvwaddch(w, draw_y, 4 + col, c);
+          wattroff(w, A_REVERSE);
+        } else {
+          if (c == ':') {
+            wattron(w, COLOR_PAIR(COLOR_PAIR_SWIPE));
+            mvwaddch(w, draw_y, 4 + col, c);
+            wattroff(w, COLOR_PAIR(COLOR_PAIR_SWIPE));
+          } else {
+            mvwaddch(w, draw_y, 4 + col, c);
+          }
+        }
+        col++;
+        buf_pos++;
+      }
+
+      if (m->sampler_yaml_buffer[buf_pos] == '\n') {
+        if (buf_pos == m->sampler_yaml_cursor) {
+          wattron(w, A_REVERSE);
+          mvwaddch(w, draw_y, 4 + col, ' ');
+          wattroff(w, A_REVERSE);
+        }
+        buf_pos++;
+        line++;
+      } else if (!m->sampler_yaml_buffer[buf_pos] &&
+                 buf_pos == m->sampler_yaml_cursor) {
+        wattron(w, A_REVERSE);
+        mvwaddch(w, draw_y, 4 + col, ' ');
+        wattroff(w, A_REVERSE);
+      }
+    } else if (y == 0 && !m->sampler_yaml_buffer[0]) {
+      wattron(w, A_REVERSE);
+      mvwaddch(w, draw_y, 4, ' ');
+      wattroff(w, A_REVERSE);
+    }
+  }
+
+  mvwhline(w, m->height - 4, 1, ACS_HLINE, m->width - 2);
+  mvwaddch(w, m->height - 4, 0, ACS_LTEE);
+  mvwaddch(w, m->height - 4, m->width - 1, ACS_RTEE);
+
+  wattron(w, COLOR_PAIR(COLOR_PAIR_HINT) | A_DIM);
+  mvwprintw(w, m->height - 3, 2,
+            "Format: key: value  |  key: [a, b]  |  key: true");
+  wattroff(w, COLOR_PAIR(COLOR_PAIR_HINT) | A_DIM);
+
+  wattron(w, A_DIM);
+  mvwprintw(w, m->height - 2, 2, "Tab");
+  wattroff(w, A_DIM);
+  mvwprintw(w, m->height - 2, 6, "import");
+  wattron(w, A_DIM);
+  mvwprintw(w, m->height - 2, 15, "Esc");
+  wattroff(w, A_DIM);
+  mvwprintw(w, m->height - 2, 19, "cancel");
+  wattron(w, A_DIM);
+  mvwprintw(w, m->height - 2, 28, "Enter");
+  wattroff(w, A_DIM);
+  mvwprintw(w, m->height - 2, 34, "newline");
+
+  wrefresh(w);
+}
+
 void modal_draw(Modal *m, const ModelsFile *mf) {
   if (!m->win)
     return;
@@ -1789,6 +1930,9 @@ void modal_draw(Modal *m, const ModelsFile *mf) {
     break;
   case MODAL_SAMPLER_SETTINGS:
     draw_sampler_settings(m);
+    break;
+  case MODAL_SAMPLER_YAML:
+    draw_sampler_yaml(m);
     break;
   default:
     break;
@@ -2534,6 +2678,318 @@ ModalResult modal_handle_key(Modal *m, int ch, ModelsFile *mf,
     return MODAL_RESULT_NONE;
   }
 
+  if (m->type == MODAL_SAMPLER_YAML) {
+    SamplerSettings *s = &m->sampler;
+
+    if (ch == 27) {
+      SamplerSettings saved = *s;
+      ApiType saved_api = m->sampler_api_type;
+      modal_open_sampler_settings(m, saved_api);
+      m->sampler = saved;
+      return MODAL_RESULT_NONE;
+    }
+
+    if (ch == '\t') {
+      char *p = m->sampler_yaml_buffer;
+      while (*p) {
+        while (*p == ' ' || *p == '\t' || *p == '\n')
+          p++;
+        if (!*p)
+          break;
+
+        char key[64] = {0};
+        int ki = 0;
+        while (*p && *p != ':' && *p != '\n' && ki < 63) {
+          if (*p != ' ' && *p != '\t')
+            key[ki++] = *p;
+          p++;
+        }
+        key[ki] = '\0';
+
+        if (*p != ':') {
+          while (*p && *p != '\n')
+            p++;
+          continue;
+        }
+        p++;
+
+        while (*p == ' ' || *p == '\t')
+          p++;
+
+        if (*p == '[') {
+          p++;
+          char first_item[64] = {0};
+          int is_string_list = 0;
+          int is_int_list = 1;
+          double list_vals[MAX_LIST_ITEMS];
+          char list_strs[MAX_LIST_ITEMS][64];
+          int list_cnt = 0;
+
+          while (*p && *p != ']' && list_cnt < MAX_LIST_ITEMS) {
+            while (*p == ' ' || *p == '\t' || *p == ',')
+              p++;
+            if (*p == ']')
+              break;
+
+            if (*p == '"') {
+              is_string_list = 1;
+              is_int_list = 0;
+              p++;
+              int vi = 0;
+              while (*p && *p != '"' && vi < 63) {
+                list_strs[list_cnt][vi++] = *p++;
+              }
+              list_strs[list_cnt][vi] = '\0';
+              if (*p == '"')
+                p++;
+              list_cnt++;
+            } else if (*p == '-' || (*p >= '0' && *p <= '9')) {
+              char num[32] = {0};
+              int ni = 0;
+              while (*p &&
+                     ((*p >= '0' && *p <= '9') || *p == '.' || *p == '-' ||
+                      *p == 'e' || *p == 'E') &&
+                     ni < 31) {
+                if (*p == '.')
+                  is_int_list = 0;
+                num[ni++] = *p++;
+              }
+              list_vals[list_cnt] = atof(num);
+              if (list_cnt == 0)
+                strncpy(first_item, num, 63);
+              list_cnt++;
+            } else {
+              p++;
+            }
+          }
+          if (*p == ']')
+            p++;
+
+          if (key[0] && list_cnt > 0) {
+            SamplerValueType type = is_string_list ? SAMPLER_TYPE_LIST_STRING
+                                    : is_int_list  ? SAMPLER_TYPE_LIST_INT
+                                                   : SAMPLER_TYPE_LIST_FLOAT;
+            sampler_add_custom(s, key, type, 0, NULL, 0, 100, 1);
+            CustomSampler *cs = &s->custom[s->custom_count - 1];
+            cs->list_count = list_cnt;
+            for (int i = 0; i < list_cnt; i++) {
+              cs->list_values[i] = list_vals[i];
+              strncpy(cs->list_strings[i], list_strs[i], 63);
+            }
+          }
+        } else if (*p == '{') {
+          p++;
+          DictEntry entries[MAX_DICT_ITEMS];
+          int dict_cnt = 0;
+
+          while (*p && *p != '}' && dict_cnt < MAX_DICT_ITEMS) {
+            while (*p == ' ' || *p == '\t' || *p == ',' || *p == '\n')
+              p++;
+            if (*p == '}')
+              break;
+
+            char dkey[32] = {0};
+            int dki = 0;
+            if (*p == '"') {
+              p++;
+              while (*p && *p != '"' && dki < 31)
+                dkey[dki++] = *p++;
+              if (*p == '"')
+                p++;
+            } else {
+              while (*p && *p != ':' && *p != ' ' && dki < 31)
+                dkey[dki++] = *p++;
+            }
+            dkey[dki] = '\0';
+
+            while (*p == ' ' || *p == '\t')
+              p++;
+            if (*p == ':')
+              p++;
+            while (*p == ' ' || *p == '\t')
+              p++;
+
+            if (*p == '"') {
+              p++;
+              int vi = 0;
+              while (*p && *p != '"' && vi < 63) {
+                entries[dict_cnt].str_val[vi++] = *p++;
+              }
+              entries[dict_cnt].str_val[vi] = '\0';
+              if (*p == '"')
+                p++;
+              entries[dict_cnt].is_string = true;
+            } else {
+              char num[32] = {0};
+              int ni = 0;
+              while (*p &&
+                     ((*p >= '0' && *p <= '9') || *p == '.' || *p == '-') &&
+                     ni < 31)
+                num[ni++] = *p++;
+              entries[dict_cnt].num_val = atof(num);
+              entries[dict_cnt].is_string = false;
+            }
+            strncpy(entries[dict_cnt].key, dkey, 31);
+            dict_cnt++;
+          }
+          if (*p == '}')
+            p++;
+
+          if (key[0] && dict_cnt > 0) {
+            sampler_add_custom(s, key, SAMPLER_TYPE_DICT, 0, NULL, 0, 100, 1);
+            CustomSampler *cs = &s->custom[s->custom_count - 1];
+            cs->dict_count = dict_cnt;
+            for (int i = 0; i < dict_cnt; i++) {
+              cs->dict_entries[i] = entries[i];
+            }
+          }
+        } else if (strncmp(p, "true", 4) == 0 || strncmp(p, "false", 5) == 0) {
+          bool bval = (*p == 't');
+          if (key[0]) {
+            sampler_add_custom(s, key, SAMPLER_TYPE_BOOL, bval ? 1.0 : 0.0,
+                               NULL, 0, 1, 1);
+          }
+          while (*p && *p != '\n')
+            p++;
+        } else if (*p == '"') {
+          p++;
+          char val[256] = {0};
+          int vi = 0;
+          while (*p && *p != '"' && *p != '\n' && vi < 255)
+            val[vi++] = *p++;
+          val[vi] = '\0';
+          if (*p == '"')
+            p++;
+          if (key[0]) {
+            sampler_add_custom(s, key, SAMPLER_TYPE_STRING, 0, val, 0, 100, 1);
+          }
+        } else if (*p == '-' || (*p >= '0' && *p <= '9')) {
+          char num[32] = {0};
+          int ni = 0;
+          bool is_float = false;
+          while (*p &&
+                 ((*p >= '0' && *p <= '9') || *p == '.' || *p == '-' ||
+                  *p == 'e' || *p == 'E') &&
+                 ni < 31) {
+            if (*p == '.' || *p == 'e' || *p == 'E')
+              is_float = true;
+            num[ni++] = *p++;
+          }
+          double val = atof(num);
+          if (key[0]) {
+            bool added = sampler_add_custom(
+                s, key, is_float ? SAMPLER_TYPE_FLOAT : SAMPLER_TYPE_INT, val,
+                NULL, 0, 100, is_float ? 0.1 : 1);
+            (void)added;
+          }
+        }
+
+        while (*p && *p != '\n')
+          p++;
+      }
+
+      SamplerSettings saved = *s;
+      ApiType saved_api = m->sampler_api_type;
+      modal_open_sampler_settings(m, saved_api);
+      m->sampler = saved;
+      return MODAL_RESULT_NONE;
+    }
+
+    if (ch == '\n' || ch == '\r') {
+      int len = (int)strlen(m->sampler_yaml_buffer);
+      if (len < 4094) {
+        memmove(&m->sampler_yaml_buffer[m->sampler_yaml_cursor + 1],
+                &m->sampler_yaml_buffer[m->sampler_yaml_cursor],
+                len - m->sampler_yaml_cursor + 1);
+        m->sampler_yaml_buffer[m->sampler_yaml_cursor] = '\n';
+        m->sampler_yaml_cursor++;
+      }
+      return MODAL_RESULT_NONE;
+    }
+
+    if (ch == KEY_BACKSPACE || ch == 127) {
+      int len = (int)strlen(m->sampler_yaml_buffer);
+      if (m->sampler_yaml_cursor > 0 && len > 0) {
+        memmove(&m->sampler_yaml_buffer[m->sampler_yaml_cursor - 1],
+                &m->sampler_yaml_buffer[m->sampler_yaml_cursor],
+                len - m->sampler_yaml_cursor + 1);
+        m->sampler_yaml_cursor--;
+      }
+      return MODAL_RESULT_NONE;
+    }
+
+    if (ch == KEY_LEFT) {
+      if (m->sampler_yaml_cursor > 0)
+        m->sampler_yaml_cursor--;
+      return MODAL_RESULT_NONE;
+    }
+
+    if (ch == KEY_RIGHT) {
+      if (m->sampler_yaml_cursor < (int)strlen(m->sampler_yaml_buffer))
+        m->sampler_yaml_cursor++;
+      return MODAL_RESULT_NONE;
+    }
+
+    if (ch == KEY_UP) {
+      int pos = m->sampler_yaml_cursor;
+      int col = 0;
+      while (pos > 0 && m->sampler_yaml_buffer[pos - 1] != '\n') {
+        pos--;
+        col++;
+      }
+      if (pos > 0) {
+        pos--;
+        int prev_line_start = pos;
+        while (prev_line_start > 0 &&
+               m->sampler_yaml_buffer[prev_line_start - 1] != '\n')
+          prev_line_start--;
+        int prev_line_len = pos - prev_line_start;
+        if (col > prev_line_len)
+          col = prev_line_len;
+        m->sampler_yaml_cursor = prev_line_start + col;
+      }
+      return MODAL_RESULT_NONE;
+    }
+
+    if (ch == KEY_DOWN) {
+      int len = (int)strlen(m->sampler_yaml_buffer);
+      int pos = m->sampler_yaml_cursor;
+      int col = 0;
+      while (pos > 0 && m->sampler_yaml_buffer[pos - 1] != '\n') {
+        pos--;
+        col++;
+      }
+      pos = m->sampler_yaml_cursor;
+      while (pos < len && m->sampler_yaml_buffer[pos] != '\n')
+        pos++;
+      if (pos < len) {
+        pos++;
+        int next_line_start = pos;
+        while (pos < len && m->sampler_yaml_buffer[pos] != '\n')
+          pos++;
+        int next_line_len = pos - next_line_start;
+        if (col > next_line_len)
+          col = next_line_len;
+        m->sampler_yaml_cursor = next_line_start + col;
+      }
+      return MODAL_RESULT_NONE;
+    }
+
+    if (ch >= 32 && ch < 127) {
+      int len = (int)strlen(m->sampler_yaml_buffer);
+      if (len < 4094) {
+        memmove(&m->sampler_yaml_buffer[m->sampler_yaml_cursor + 1],
+                &m->sampler_yaml_buffer[m->sampler_yaml_cursor],
+                len - m->sampler_yaml_cursor + 1);
+        m->sampler_yaml_buffer[m->sampler_yaml_cursor] = (char)ch;
+        m->sampler_yaml_cursor++;
+      }
+      return MODAL_RESULT_NONE;
+    }
+
+    return MODAL_RESULT_NONE;
+  }
+
   if (m->type == MODAL_SAMPLER_SETTINGS) {
     SamplerSettings *s = &m->sampler;
 
@@ -3053,6 +3509,13 @@ ModalResult modal_handle_key(Modal *m, int ch, ModelsFile *mf,
       m->sampler_custom_step[0] = '\0';
       m->sampler_custom_type = SAMPLER_TYPE_FLOAT;
       m->sampler_custom_cursor = 0;
+      return MODAL_RESULT_NONE;
+    }
+
+    if (ch == 'y' || ch == 'Y') {
+      SamplerSettings saved_sampler = m->sampler;
+      ApiType saved_api = m->sampler_api_type;
+      modal_open_sampler_yaml(m, &saved_sampler, saved_api);
       return MODAL_RESULT_NONE;
     }
 

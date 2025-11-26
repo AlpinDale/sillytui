@@ -13,6 +13,7 @@ static bool g_ui_colors = false;
 #define COLOR_PAIR_USER_SEL 25
 #define COLOR_PAIR_BOT_SEL 26
 #define COLOR_PAIR_HINT_SEL 27
+#define COLOR_PAIR_MODAL_BG 28
 
 #define SEL_BG 236
 
@@ -39,6 +40,7 @@ void ui_init_colors(void) {
   init_pair(COLOR_PAIR_USER_SEL, COLOR_GREEN, SEL_BG);
   init_pair(COLOR_PAIR_BOT_SEL, COLOR_MAGENTA, SEL_BG);
   init_pair(COLOR_PAIR_HINT_SEL, 8, SEL_BG);
+  init_pair(COLOR_PAIR_MODAL_BG, COLOR_WHITE, COLOR_BLACK);
   g_ui_colors = true;
 }
 

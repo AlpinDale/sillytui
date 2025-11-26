@@ -24,7 +24,8 @@ typedef enum {
   MODAL_GREETING_SELECT,
   MODAL_MESSAGE_EDIT,
   MODAL_MESSAGE_DELETE_CONFIRM,
-  MODAL_SAMPLER_SETTINGS
+  MODAL_SAMPLER_SETTINGS,
+  MODAL_SAMPLER_YAML
 } ModalType;
 
 typedef struct {
@@ -96,6 +97,9 @@ typedef struct {
   char sampler_dict_val[64];
   int sampler_dict_cursor;
   bool sampler_dict_val_is_str;
+  char sampler_yaml_buffer[4096];
+  int sampler_yaml_cursor;
+  int sampler_yaml_scroll;
 } Modal;
 
 typedef enum {
@@ -129,6 +133,8 @@ void modal_open_greeting_select(Modal *m, const CharacterCard *card);
 void modal_open_message_edit(Modal *m, int msg_index, const char *content);
 void modal_open_message_delete(Modal *m, int msg_index);
 void modal_open_sampler_settings(Modal *m, ApiType api_type);
+void modal_open_sampler_yaml(Modal *m, SamplerSettings *sampler,
+                             ApiType api_type);
 int modal_get_edit_msg_index(const Modal *m);
 const char *modal_get_edit_content(const Modal *m);
 void modal_close(Modal *m);
