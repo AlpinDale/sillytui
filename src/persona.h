@@ -4,7 +4,7 @@
 #include <stdbool.h>
 
 #define PERSONA_NAME_MAX 64
-#define PERSONA_DESC_MAX 4096
+#define PERSONA_DESC_MAX 131072
 
 typedef struct {
   char name[PERSONA_NAME_MAX];

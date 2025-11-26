@@ -21,7 +21,7 @@
 #include "sampler.h"
 #include "ui.h"
 
-#define INPUT_MAX 4096
+#define INPUT_MAX 8192
 
 static const char *SPINNER_FRAMES[] = {"thinking", "thinking.", "thinking..",
                                        "thinking..."};

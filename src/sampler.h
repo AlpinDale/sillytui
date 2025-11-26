@@ -4,11 +4,11 @@
 #include "config.h"
 #include <stdbool.h>
 
-#define MAX_CUSTOM_SAMPLERS 32
+#define MAX_CUSTOM_SAMPLERS 512
 #define CUSTOM_SAMPLER_NAME_LEN 64
 #define CUSTOM_SAMPLER_STR_LEN 256
-#define MAX_LIST_ITEMS 32
-#define MAX_DICT_ITEMS 32
+#define MAX_LIST_ITEMS 512
+#define MAX_DICT_ITEMS 512
 #define DICT_KEY_LEN 32
 #define DICT_VAL_LEN 64
 

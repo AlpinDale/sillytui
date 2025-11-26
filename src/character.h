@@ -5,7 +5,7 @@
 #include <stddef.h>
 
 #define CHAR_NAME_MAX 128
-#define CHAR_FIELD_MAX 8192
+#define CHAR_FIELD_MAX 131072
 #define CHAR_GREETINGS_MAX 16
 
 typedef struct {

@@ -4,7 +4,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 
-#define MAX_SWIPES 16
+#define MAX_SWIPES 2048
 
 typedef struct {
   char **swipes;
