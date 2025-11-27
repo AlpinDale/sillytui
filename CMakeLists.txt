@@ -25,6 +25,7 @@ set(SOURCES
     src/character/persona.c
     src/tokenizer/tiktoken.c
     src/tokenizer/sentencepiece.c
+    src/tokenizer/gpt2bpe.c
     src/tokenizer/simd.c
     src/tokenizer/unicode_tables.c
 )
