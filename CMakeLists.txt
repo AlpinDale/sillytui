@@ -23,7 +23,8 @@ set(SOURCES
     src/llm/sampler.c
     src/character/character.c
     src/character/persona.c
-    src/tokenizer/tokenizer.c
+    src/tokenizer/tiktoken.c
+    src/tokenizer/sentencepiece.c
     src/tokenizer/simd.c
     src/tokenizer/unicode_tables.c
 )

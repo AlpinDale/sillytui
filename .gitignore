@@ -59,3 +59,10 @@ third-party/
 .cache/
 compile_commands.json
 .DS_Store
+
+# Benchmark binaries
+bench/bench_*
+bench/profile_*
+bench/test_*
+!bench/*.c
+!bench/*.py

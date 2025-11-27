@@ -1,4 +1,4 @@
-#include "tokenizer/tokenizer.h"
+#include "tokenizer/tiktoken.h"
 #include "tokenizer/simd.h"
 #include "tokenizer/unicode_tables.h"
 #include <ctype.h>

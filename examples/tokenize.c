@@ -2,7 +2,7 @@
  * Example usage of the tokenizer.
  *
  * To compile (from the project root directory):
- * cc -O3 -o tokenize examples/tokenize.c src/tokenizer/tokenizer.c \
+ * cc -O3 -o tokenize examples/tokenize.c src/tokenizer/tiktoken.c \
  *     src/tokenizer/simd.c src/tokenizer/simd_arm64.S \
  *     src/tokenizer/unicode_tables.c -Isrc
  *
@@ -11,7 +11,7 @@
  */
 
 #include "tokenizer/simd.h"
-#include "tokenizer/tokenizer.h"
+#include "tokenizer/tiktoken.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

@@ -1,5 +1,5 @@
-#ifndef TOKENIZER_H
-#define TOKENIZER_H
+#ifndef TIKTOKEN_H
+#define TIKTOKEN_H
 
 #include <stdbool.h>
 #include <stddef.h>
