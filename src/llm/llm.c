@@ -21,6 +21,7 @@ typedef struct {
   struct timeval first_token_time;
   struct timeval last_token_time;
   bool has_first_token;
+  bool is_anthropic;
 } StreamCtx;
 
 void llm_init(void) { curl_global_init(CURL_GLOBAL_DEFAULT); }
@@ -49,15 +50,15 @@ static size_t tokenize_write_callback(char *ptr, size_t size, size_t nmemb,
 }
 
 static int parse_token_count(const char *json) {
-  const char *patterns[] = {
-      "\"length\":", "\"count\":", "\"value\":", "\"tokens\":"};
-  for (int i = 0; i < 4; i++) {
+  const char *patterns[] = {"\"input_tokens\":", "\"length\":", "\"count\":",
+                            "\"value\":", "\"tokens\":"};
+  for (int i = 0; i < 5; i++) {
     const char *p = strstr(json, patterns[i]);
     if (p) {
       p += strlen(patterns[i]);
       while (*p == ' ' || *p == '\t')
         p++;
-      if (i == 3) {
+      if (i == 4) {
         if (*p == '[') {
           int count = 0;
           p++;
@@ -122,6 +123,9 @@ int llm_tokenize(const ModelConfig *config, const char *text) {
   case API_TYPE_TABBY:
     snprintf(url, sizeof(url), "%s/v1/token/encode", base_no_v1);
     break;
+  case API_TYPE_ANTHROPIC:
+    snprintf(url, sizeof(url), "%s/v1/messages/count_tokens", base_no_v1);
+    break;
   default:
     curl_easy_cleanup(curl);
     return llm_estimate_tokens(text);
@@ -156,6 +160,12 @@ int llm_tokenize(const ModelConfig *config, const char *text) {
   case API_TYPE_TABBY:
     snprintf(body, body_size, "{\"text\":\"%s\"}", escaped_text);
     break;
+  case API_TYPE_ANTHROPIC:
+    snprintf(body, body_size,
+             "{\"model\":\"%s\",\"messages\":[{\"role\":\"user\",\"content\":"
+             "\"%s\"}]}",
+             config->model_id, escaped_text);
+    break;
   default:
     break;
   }
@@ -166,8 +176,14 @@ int llm_tokenize(const ModelConfig *config, const char *text) {
   headers = curl_slist_append(headers, "Content-Type: application/json");
   if (config->api_key[0]) {
     char auth[300];
-    snprintf(auth, sizeof(auth), "Authorization: Bearer %s", config->api_key);
-    headers = curl_slist_append(headers, auth);
+    if (config->api_type == API_TYPE_ANTHROPIC) {
+      snprintf(auth, sizeof(auth), "x-api-key: %s", config->api_key);
+      headers = curl_slist_append(headers, auth);
+      headers = curl_slist_append(headers, "anthropic-version: 2023-06-01");
+    } else {
+      snprintf(auth, sizeof(auth), "Authorization: Bearer %s", config->api_key);
+      headers = curl_slist_append(headers, auth);
+    }
   }
 
   char *response = NULL;
@@ -279,7 +295,8 @@ static int find_json_int(const char *json, const char *key) {
   return -1;
 }
 
-static void process_sse_line(StreamCtx *ctx, const char *line) {
+static void process_sse_line(StreamCtx *ctx, const char *line,
+                             bool is_anthropic) {
   if (strncmp(line, "data: ", 6) != 0)
     return;
   const char *data = line + 6;
@@ -291,25 +308,42 @@ static void process_sse_line(StreamCtx *ctx, const char *line) {
   if (usage) {
     int prompt = find_json_int(usage, "prompt_tokens");
     int completion = find_json_int(usage, "completion_tokens");
+    if (prompt < 0)
+      prompt = find_json_int(usage, "input_tokens");
+    if (completion < 0)
+      completion = find_json_int(usage, "output_tokens");
     if (prompt > 0)
       ctx->prompt_tokens = prompt;
     if (completion > 0)
       ctx->completion_tokens = completion;
   }
 
-  const char *choices = strstr(data, "\"choices\"");
-  if (!choices)
-    return;
+  char *content = NULL;
 
-  const char *delta = strstr(choices, "\"delta\"");
-  if (!delta)
-    return;
+  if (is_anthropic) {
+    if (strstr(data, "\"content_block_delta\"") ||
+        strstr(data, "\"text_delta\"")) {
+      const char *delta = strstr(data, "\"delta\"");
+      if (delta) {
+        content = find_json_string(delta, "text");
+      }
+    }
+  } else {
+    const char *choices = strstr(data, "\"choices\"");
+    if (!choices)
+      return;
 
-  const char *content_key = strstr(delta, "\"content\"");
-  if (!content_key)
-    return;
+    const char *delta = strstr(choices, "\"delta\"");
+    if (!delta)
+      return;
 
-  char *content = find_json_string(delta, "content");
+    const char *content_key = strstr(delta, "\"content\"");
+    if (!content_key)
+      return;
+
+    content = find_json_string(delta, "content");
+  }
+
   if (content && content[0]) {
     if (!ctx->has_first_token) {
       gettimeofday(&ctx->first_token_time, NULL);
@@ -335,7 +369,7 @@ static size_t stream_callback(char *ptr, size_t size, size_t nmemb,
     if (c == '\n') {
       ctx->line_buffer[ctx->line_len] = '\0';
       if (ctx->line_len > 0) {
-        process_sse_line(ctx, ctx->line_buffer);
+        process_sse_line(ctx, ctx->line_buffer, ctx->is_anthropic);
       }
       ctx->line_len = 0;
     } else if (c != '\r' && ctx->line_len < sizeof(ctx->line_buffer) - 1) {
@@ -630,6 +664,201 @@ static int count_tokens(const ModelConfig *config, const char *text) {
   if (!config || config->api_type == API_TYPE_OPENAI)
     return llm_estimate_tokens(text);
   return llm_tokenize(config, text);
+}
+
+static char *build_anthropic_request_body(const ModelConfig *config,
+                                          const ChatHistory *history,
+                                          const LLMContext *context) {
+  int context_length = config->context_length > 0 ? config->context_length
+                                                  : DEFAULT_CONTEXT_LENGTH;
+  size_t cap = 16384;
+  char *body = malloc(cap);
+  if (!body)
+    return NULL;
+
+  const char *char_name =
+      (context && context->character) ? context->character->name : NULL;
+  const char *user_name = (context && context->persona)
+                              ? persona_get_name(context->persona)
+                              : "User";
+
+  size_t pos = 0;
+  pos += snprintf(body + pos, cap - pos, "{\"model\":\"%s\"", config->model_id);
+
+  char *system_prompt = build_system_prompt(context);
+  if (system_prompt) {
+    char *escaped = escape_json_string(system_prompt);
+    if (escaped) {
+      size_t needed = strlen(escaped) + 64;
+      if (pos + needed >= cap) {
+        cap = (pos + needed) * 2;
+        char *tmp = realloc(body, cap);
+        if (tmp)
+          body = tmp;
+      }
+      pos += snprintf(body + pos, cap - pos, ",\"system\":\"%s\"", escaped);
+      free(escaped);
+    }
+    free(system_prompt);
+  }
+
+  pos += snprintf(body + pos, cap - pos, ",\"messages\":[");
+
+  bool first = true;
+
+  if (context && context->character && context->character->mes_example) {
+    size_t example_count = 0;
+    ExampleMessage *examples = parse_mes_example(
+        context->character->mes_example, &example_count, char_name, user_name);
+    if (examples) {
+      for (size_t i = 0; i < example_count; i++) {
+        char *escaped = escape_json_string(examples[i].content);
+        if (!escaped)
+          continue;
+
+        size_t needed = strlen(escaped) + 64;
+        if (pos + needed >= cap) {
+          cap = (pos + needed) * 2;
+          char *tmp = realloc(body, cap);
+          if (tmp)
+            body = tmp;
+        }
+
+        if (!first)
+          body[pos++] = ',';
+        first = false;
+
+        pos += snprintf(body + pos, cap - pos,
+                        "{\"role\":\"%s\",\"content\":\"%s\"}",
+                        examples[i].role, escaped);
+        free(escaped);
+      }
+      free_example_messages(examples, example_count);
+    }
+  }
+
+  int tokens_used = count_tokens(config, body);
+
+  const SamplerSettings *s = context ? context->samplers : NULL;
+  int max_tok = (s && s->max_tokens > 0) ? s->max_tokens : 4096;
+  int available_tokens = context_length - tokens_used - max_tok;
+
+  int post_history_tokens = 0;
+  if (context && context->character &&
+      context->character->post_history_instructions &&
+      context->character->post_history_instructions[0]) {
+    post_history_tokens =
+        count_tokens(config, context->character->post_history_instructions) +
+        20;
+    available_tokens -= post_history_tokens;
+  }
+
+  size_t start_index = 0;
+  if (history->count > 0 && available_tokens > 0) {
+    int cumulative_tokens = 0;
+    for (size_t i = history->count; i > 0; i--) {
+      const char *msg = history_get(history, i - 1);
+      if (!msg)
+        continue;
+
+      int msg_tokens = count_tokens(config, msg) + 20;
+      if (cumulative_tokens + msg_tokens > available_tokens) {
+        start_index = i;
+        break;
+      }
+      cumulative_tokens += msg_tokens;
+    }
+  }
+
+  for (size_t i = start_index; i < history->count; i++) {
+    const char *msg = history_get(history, i);
+    if (!msg)
+      continue;
+    const char *role = NULL;
+    const char *content = NULL;
+
+    if (strncmp(msg, "You: ", 5) == 0) {
+      role = "user";
+      content = msg + 5;
+    } else if (strncmp(msg, "Bot: ", 5) == 0) {
+      role = "assistant";
+      content = msg + 5;
+    } else if (strncmp(msg, "Bot:", 4) == 0) {
+      role = "assistant";
+      content = msg + 4;
+      while (*content == ' ')
+        content++;
+    } else {
+      continue;
+    }
+
+    char *escaped = escape_json_string(content);
+    if (!escaped)
+      continue;
+
+    size_t needed = strlen(escaped) + 64;
+    if (pos + needed >= cap) {
+      cap = (pos + needed) * 2;
+      char *tmp = realloc(body, cap);
+      if (!tmp) {
+        free(escaped);
+        free(body);
+        return NULL;
+      }
+      body = tmp;
+    }
+
+    if (!first)
+      body[pos++] = ',';
+    first = false;
+
+    pos += snprintf(body + pos, cap - pos,
+                    "{\"role\":\"%s\",\"content\":\"%s\"}", role, escaped);
+    free(escaped);
+  }
+
+  if (context && context->character &&
+      context->character->post_history_instructions &&
+      context->character->post_history_instructions[0]) {
+    char *substituted = macro_substitute(
+        context->character->post_history_instructions, char_name, user_name);
+    if (substituted) {
+      char *escaped = escape_json_string(substituted);
+      if (escaped) {
+        size_t needed = strlen(escaped) + 64;
+        if (pos + needed >= cap) {
+          cap = (pos + needed) * 2;
+          char *tmp = realloc(body, cap);
+          if (tmp)
+            body = tmp;
+        }
+        if (!first)
+          body[pos++] = ',';
+        pos += snprintf(body + pos, cap - pos,
+                        "{\"role\":\"user\",\"content\":\"%s\"}", escaped);
+        free(escaped);
+      }
+      free(substituted);
+    }
+  }
+
+  pos += snprintf(body + pos, cap - pos, "]");
+
+  pos += snprintf(body + pos, cap - pos, ",\"max_tokens\":%d", max_tok);
+  pos += snprintf(body + pos, cap - pos, ",\"stream\":true");
+
+  if (s) {
+    if (s->temperature != 1.0)
+      pos += snprintf(body + pos, cap - pos, ",\"temperature\":%.4g",
+                      s->temperature);
+    if (s->top_p != 1.0)
+      pos += snprintf(body + pos, cap - pos, ",\"top_p\":%.4g", s->top_p);
+    if (s->top_k > 0)
+      pos += snprintf(body + pos, cap - pos, ",\"top_k\":%d", s->top_k);
+  }
+
+  pos += snprintf(body + pos, cap - pos, "}");
+  return body;
 }
 
 static char *build_request_body(const ModelConfig *config,
@@ -980,9 +1209,26 @@ LLMResponse llm_chat(const ModelConfig *config, const ChatHistory *history,
   }
 
   char url[512];
-  snprintf(url, sizeof(url), "%s/chat/completions", config->base_url);
+  if (config->api_type == API_TYPE_ANTHROPIC) {
+    const char *base = config->base_url;
+    size_t base_len = strlen(base);
+    while (base_len > 0 && base[base_len - 1] == '/')
+      base_len--;
+    char base_trimmed[256];
+    snprintf(base_trimmed, sizeof(base_trimmed), "%.*s", (int)base_len, base);
+    if (base_len >= 3 && strcmp(base_trimmed + base_len - 3, "/v1") == 0)
+      base_trimmed[base_len - 3] = '\0';
+    snprintf(url, sizeof(url), "%s/v1/messages", base_trimmed);
+  } else {
+    snprintf(url, sizeof(url), "%s/chat/completions", config->base_url);
+  }
 
-  char *body = build_request_body(config, history, context);
+  char *body;
+  if (config->api_type == API_TYPE_ANTHROPIC) {
+    body = build_anthropic_request_body(config, history, context);
+  } else {
+    body = build_request_body(config, history, context);
+  }
   if (!body) {
     snprintf(resp.error, sizeof(resp.error), "Failed to build request");
     curl_easy_cleanup(curl);
@@ -994,8 +1240,14 @@ LLMResponse llm_chat(const ModelConfig *config, const ChatHistory *history,
 
   if (config->api_key[0]) {
     char auth[320];
-    snprintf(auth, sizeof(auth), "Authorization: Bearer %s", config->api_key);
-    headers = curl_slist_append(headers, auth);
+    if (config->api_type == API_TYPE_ANTHROPIC) {
+      snprintf(auth, sizeof(auth), "x-api-key: %s", config->api_key);
+      headers = curl_slist_append(headers, auth);
+      headers = curl_slist_append(headers, "anthropic-version: 2023-06-01");
+    } else {
+      snprintf(auth, sizeof(auth), "Authorization: Bearer %s", config->api_key);
+      headers = curl_slist_append(headers, auth);
+    }
   }
 
   StreamCtx ctx = {.resp = &resp,
@@ -1006,7 +1258,8 @@ LLMResponse llm_chat(const ModelConfig *config, const ChatHistory *history,
                    .got_content = false,
                    .prompt_tokens = 0,
                    .completion_tokens = 0,
-                   .has_first_token = false};
+                   .has_first_token = false,
+                   .is_anthropic = (config->api_type == API_TYPE_ANTHROPIC)};
 
   curl_easy_setopt(curl, CURLOPT_URL, url);
   curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);

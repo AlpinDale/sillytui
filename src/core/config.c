@@ -8,7 +8,8 @@
 #include <unistd.h>
 
 static const char *API_TYPE_NAMES[] = {"openai",   "aphrodite", "vllm",
-                                       "llamacpp", "koboldcpp", "tabby"};
+                                       "llamacpp", "koboldcpp", "tabby",
+                                       "anthropic"};
 
 const char *api_type_name(ApiType type) {
   if (type >= 0 && type < API_TYPE_COUNT)

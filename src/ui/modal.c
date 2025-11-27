@@ -20,11 +20,17 @@ static void create_window(Modal *m, int height, int width) {
   if (m->height > max_y - 4)
     m->height = max_y - 4;
 
+  if (m->height < 1)
+    m->height = 1;
+  if (m->width < 1)
+    m->width = 1;
+
   m->start_y = (max_y - m->height) / 2;
   m->start_x = (max_x - m->width) / 2;
 
   m->win = newwin(m->height, m->width, m->start_y, m->start_x);
-  keypad(m->win, TRUE);
+  if (m->win)
+    keypad(m->win, TRUE);
 }
 
 void modal_open_model_set(Modal *m) {
@@ -311,7 +317,9 @@ void modal_close(Modal *m) {
   m->type = MODAL_NONE;
 }
 
-bool modal_is_open(const Modal *m) { return m->type != MODAL_NONE; }
+bool modal_is_open(const Modal *m) {
+  return m->type != MODAL_NONE && m->win != NULL;
+}
 
 bool modal_get_exit_dont_ask(const Modal *m) { return m->exit_dont_ask; }
 
