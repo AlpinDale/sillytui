@@ -23,11 +23,6 @@ typedef struct {
 } GPT2Merge;
 
 typedef struct {
-  int32_t children[256];
-  int32_t token_id;
-} GPT2TrieNode;
-
-typedef struct {
   GPT2Token *tokens;
   size_t vocab_size;
 
@@ -46,14 +41,14 @@ typedef struct {
   uint8_t byte_to_utf8[256][4];
   uint8_t byte_to_utf8_len[256];
 
-  GPT2TrieNode *trie;
-  size_t trie_size;
-  size_t trie_cap;
-
   uint32_t *cache_keys;
   uint32_t *cache_values;
   uint8_t *cache_counts;
   size_t cache_size;
+
+  char *string_arena;
+  size_t arena_size;
+  size_t arena_used;
 
   int unk_id;
   int bos_id;

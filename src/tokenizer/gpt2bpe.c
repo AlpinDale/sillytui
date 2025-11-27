@@ -7,7 +7,43 @@
 #include <string.h>
 
 #define VOCAB_HASH_SIZE (1 << 19)
-#define MERGE_HASH_SIZE (1 << 20)
+#define MERGE_HASH_SIZE (1 << 21)
+#define STRING_ARENA_SIZE (16 * 1024 * 1024)
+
+static const int8_t HEX_TABLE[256] = {
+    -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+    -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+    -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, 0,  1,  2,  3,  4,  5,  6,  7,  8,
+    9,  -1, -1, -1, -1, -1, -1, -1, 10, 11, 12, 13, 14, 15, -1, -1, -1, -1, -1,
+    -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+    -1, -1, 10, 11, 12, 13, 14, 15, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+    -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+    -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+    -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+    -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+    -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+    -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+    -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+    -1, -1, -1, -1, -1, -1, -1, -1, -1,
+};
+
+static inline uint32_t parse_hex4(const char *p) {
+  int a = HEX_TABLE[(uint8_t)p[0]];
+  int b = HEX_TABLE[(uint8_t)p[1]];
+  int c = HEX_TABLE[(uint8_t)p[2]];
+  int d = HEX_TABLE[(uint8_t)p[3]];
+  if (a < 0 || b < 0 || c < 0 || d < 0)
+    return 0xFFFFFFFF;
+  return (a << 12) | (b << 8) | (c << 4) | d;
+}
+
+static inline char *arena_alloc(GPT2BPETokenizer *tok, size_t size) {
+  if (tok->arena_used + size > tok->arena_size)
+    return NULL;
+  char *ptr = tok->string_arena + tok->arena_used;
+  tok->arena_used += size;
+  return ptr;
+}
 
 static void init_byte_encoder(GPT2BPETokenizer *tok) {
   uint8_t bs[256];
@@ -74,13 +110,11 @@ static uint64_t merge_hash_key(const char *first, size_t first_len,
 
 static void build_vocab_hash(GPT2BPETokenizer *tok) {
   tok->vocab_hash_size = VOCAB_HASH_SIZE;
-  tok->vocab_hash = calloc(tok->vocab_hash_size, sizeof(uint32_t));
+  tok->vocab_hash = malloc(tok->vocab_hash_size * sizeof(uint32_t));
   if (!tok->vocab_hash)
     return;
 
-  for (size_t i = 0; i < tok->vocab_hash_size; i++) {
-    tok->vocab_hash[i] = UINT32_MAX;
-  }
+  memset(tok->vocab_hash, 0xFF, tok->vocab_hash_size * sizeof(uint32_t));
 
   for (size_t i = 0; i < tok->vocab_size; i++) {
     if (!tok->tokens[i].token)
@@ -95,14 +129,18 @@ static void build_vocab_hash(GPT2BPETokenizer *tok) {
 }
 
 static void build_merge_hash(GPT2BPETokenizer *tok) {
-  tok->merge_hash_size = MERGE_HASH_SIZE;
-  tok->merge_hash = calloc(tok->merge_hash_size, sizeof(uint32_t));
+  size_t min_size = tok->num_merges * 4;
+  tok->merge_hash_size = 1;
+  while (tok->merge_hash_size < min_size)
+    tok->merge_hash_size <<= 1;
+  if (tok->merge_hash_size > MERGE_HASH_SIZE)
+    tok->merge_hash_size = MERGE_HASH_SIZE;
+
+  tok->merge_hash = malloc(tok->merge_hash_size * sizeof(uint32_t));
   if (!tok->merge_hash)
     return;
 
-  for (size_t i = 0; i < tok->merge_hash_size; i++) {
-    tok->merge_hash[i] = UINT32_MAX;
-  }
+  memset(tok->merge_hash, 0xFF, tok->merge_hash_size * sizeof(uint32_t));
 
   for (size_t i = 0; i < tok->num_merges; i++) {
     uint64_t key =
@@ -148,16 +186,11 @@ void gpt2_init(GPT2BPETokenizer *tok) {
 }
 
 void gpt2_free(GPT2BPETokenizer *tok) {
-  if (tok->tokens) {
-    for (size_t i = 0; i < tok->vocab_size; i++) {
-      free(tok->tokens[i].token);
-    }
-    free(tok->tokens);
-  }
+  free(tok->tokens);
+  free(tok->string_arena);
   free(tok->merges);
   free(tok->vocab_hash);
   free(tok->merge_hash);
-  free(tok->trie);
   free(tok->cache_keys);
   free(tok->cache_values);
   free(tok->cache_counts);
@@ -203,49 +236,6 @@ static void cache_store(GPT2BPETokenizer *tok, uint32_t hash,
          count * sizeof(uint32_t));
 }
 
-static int trie_alloc_node(GPT2BPETokenizer *tok) {
-  if (tok->trie_size >= tok->trie_cap) {
-    size_t new_cap = tok->trie_cap ? tok->trie_cap * 2 : 4096;
-    GPT2TrieNode *new_trie = realloc(tok->trie, new_cap * sizeof(GPT2TrieNode));
-    if (!new_trie)
-      return -1;
-    tok->trie = new_trie;
-    tok->trie_cap = new_cap;
-  }
-  int idx = (int)tok->trie_size++;
-  memset(&tok->trie[idx], 0xFF, sizeof(GPT2TrieNode));
-  tok->trie[idx].token_id = -1;
-  return idx;
-}
-
-static void build_vocab_trie(GPT2BPETokenizer *tok) {
-  tok->trie = NULL;
-  tok->trie_size = 0;
-  tok->trie_cap = 0;
-
-  int root = trie_alloc_node(tok);
-  if (root < 0)
-    return;
-
-  for (size_t i = 0; i < tok->vocab_size; i++) {
-    const char *token = tok->tokens[i].token;
-    size_t len = tok->tokens[i].len;
-
-    int node = 0;
-    for (size_t j = 0; j < len; j++) {
-      uint8_t c = (uint8_t)token[j];
-      if (tok->trie[node].children[c] < 0) {
-        int child = trie_alloc_node(tok);
-        if (child < 0)
-          return;
-        tok->trie[node].children[c] = child;
-      }
-      node = tok->trie[node].children[c];
-    }
-    tok->trie[node].token_id = (int32_t)i;
-  }
-}
-
 static char *read_file(const char *path, size_t *out_len) {
   FILE *f = fopen(path, "rb");
   if (!f)
@@ -274,6 +264,15 @@ static bool parse_vocab_json(GPT2BPETokenizer *tok, const char *json) {
   tok->tokens = calloc(GPT2_MAX_VOCAB_SIZE, sizeof(GPT2Token));
   if (!tok->tokens)
     return false;
+
+  tok->string_arena = malloc(STRING_ARENA_SIZE);
+  if (!tok->string_arena) {
+    free(tok->tokens);
+    tok->tokens = NULL;
+    return false;
+  }
+  tok->arena_size = STRING_ARENA_SIZE;
+  tok->arena_used = 0;
 
   const char *p = json;
   while (*p && *p != '{')
@@ -319,9 +318,8 @@ static bool parse_vocab_json(GPT2BPETokenizer *tok, const char *json) {
           token_buf[token_len++] = '"';
           break;
         case 'u': {
-          if (p[1] && p[2] && p[3] && p[4]) {
-            char hex[5] = {p[1], p[2], p[3], p[4], 0};
-            uint32_t codepoint = (uint32_t)strtol(hex, NULL, 16);
+          uint32_t codepoint = parse_hex4(p + 1);
+          if (codepoint != 0xFFFFFFFF) {
             p += 4;
             if (codepoint < 0x80) {
               token_buf[token_len++] = (char)codepoint;
@@ -368,10 +366,11 @@ static bool parse_vocab_json(GPT2BPETokenizer *tok, const char *json) {
     if (id < 0 || id >= GPT2_MAX_VOCAB_SIZE)
       continue;
 
-    tok->tokens[id].token = malloc(token_len + 1);
-    if (tok->tokens[id].token) {
-      memcpy(tok->tokens[id].token, token_buf, token_len);
-      tok->tokens[id].token[token_len] = '\0';
+    char *token_str = arena_alloc(tok, token_len + 1);
+    if (token_str) {
+      memcpy(token_str, token_buf, token_len);
+      token_str[token_len] = '\0';
+      tok->tokens[id].token = token_str;
       tok->tokens[id].len = (uint16_t)token_len;
     }
 
@@ -445,11 +444,34 @@ static bool parse_merges_txt(GPT2BPETokenizer *tok, const char *txt) {
   return true;
 }
 
+#ifdef DEBUG_LOAD_TIME
+#include <mach/mach_time.h>
+static inline double debug_get_time_ns(void) {
+  static mach_timebase_info_data_t tb;
+  if (tb.denom == 0)
+    mach_timebase_info(&tb);
+  return (double)mach_absolute_time() * tb.numer / tb.denom;
+}
+#define LOAD_TIME_START() double _t0 = debug_get_time_ns()
+#define LOAD_TIME_PRINT(name)                                                  \
+  do {                                                                         \
+    double _t1 = debug_get_time_ns();                                          \
+    fprintf(stderr, "  " name ": %.2f ms\n", (_t1 - _t0) / 1e6);               \
+    _t0 = _t1;                                                                 \
+  } while (0)
+#else
+#define LOAD_TIME_START()
+#define LOAD_TIME_PRINT(name)
+#endif
+
 bool gpt2_load(GPT2BPETokenizer *tok, const char *vocab_path,
                const char *merges_path) {
+  LOAD_TIME_START();
+
   size_t vocab_len, merges_len;
   char *vocab_json = read_file(vocab_path, &vocab_len);
   char *merges_txt = read_file(merges_path, &merges_len);
+  LOAD_TIME_PRINT("read files");
 
   if (!vocab_json || !merges_txt) {
     free(vocab_json);
@@ -462,18 +484,23 @@ bool gpt2_load(GPT2BPETokenizer *tok, const char *vocab_path,
     free(merges_txt);
     return false;
   }
+  LOAD_TIME_PRINT("parse vocab");
 
   if (!parse_merges_txt(tok, merges_txt)) {
     free(vocab_json);
     free(merges_txt);
     return false;
   }
+  LOAD_TIME_PRINT("parse merges");
 
   free(vocab_json);
   free(merges_txt);
 
   build_vocab_hash(tok);
+  LOAD_TIME_PRINT("build vocab hash");
+
   build_merge_hash(tok);
+  LOAD_TIME_PRINT("build merge hash");
 
   for (size_t i = 0; i < tok->vocab_size; i++) {
     if (tok->tokens[i].token) {
@@ -486,8 +513,8 @@ bool gpt2_load(GPT2BPETokenizer *tok, const char *vocab_path,
     }
   }
 
-  build_vocab_trie(tok);
   init_bpe_cache(tok);
+  LOAD_TIME_PRINT("init cache");
 
   tok->loaded = true;
   return true;
@@ -741,23 +768,23 @@ static int gpt2_token_to_id_n(const GPT2BPETokenizer *tok, const char *token,
   return tok->unk_id;
 }
 
-static int trie_lookup_whole(const GPT2BPETokenizer *tok, const char *text,
-                             size_t len) {
-  if (!tok->trie || len == 0)
+static inline int vocab_lookup(const GPT2BPETokenizer *tok, const char *text,
+                               size_t len) {
+  if (!tok->vocab_hash || len == 0)
     return -1;
 
-  const GPT2TrieNode *trie = tok->trie;
-  int node = 0;
+  uint32_t h = gpt2_hash(text, len) & (tok->vocab_hash_size - 1);
+  const uint32_t *hash = tok->vocab_hash;
+  const GPT2Token *tokens = tok->tokens;
+  uint32_t mask = (uint32_t)(tok->vocab_hash_size - 1);
 
-  for (size_t i = 0; i < len; i++) {
-    uint8_t c = (uint8_t)text[i];
-    int child = trie[node].children[c];
-    if (child < 0)
-      return -1;
-    node = child;
+  while (hash[h] != UINT32_MAX) {
+    uint32_t idx = hash[h];
+    if (tokens[idx].len == len && memcmp(tokens[idx].token, text, len) == 0)
+      return (int)idx;
+    h = (h + 1) & mask;
   }
-
-  return trie[node].token_id;
+  return -1;
 }
 
 static int bpe_encode_piece_ids(const GPT2BPETokenizer *tok, const char *piece,
@@ -891,7 +918,7 @@ int gpt2_encode(const GPT2BPETokenizer *tok, const char *text,
     }
     encoded[encoded_len] = '\0';
 
-    int whole_token = trie_lookup_whole(tok, encoded, encoded_len);
+    int whole_token = vocab_lookup(tok, encoded, encoded_len);
     if (whole_token >= 0) {
       out_ids[num_ids++] = (uint32_t)whole_token;
     } else {
