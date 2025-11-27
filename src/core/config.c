@@ -119,6 +119,8 @@ static void write_escaped(FILE *f, const char *s) {
 }
 
 bool config_load_models(ModelsFile *mf) {
+  if (!mf)
+    return false;
   memset(mf, 0, sizeof(*mf));
   mf->active_index = -1;
 
@@ -250,7 +252,7 @@ bool config_load_models(ModelsFile *mf) {
 }
 
 bool config_save_models(const ModelsFile *mf) {
-  if (!config_ensure_dir())
+  if (!mf || !config_ensure_dir())
     return false;
 
   char path[512];
@@ -290,14 +292,14 @@ bool config_save_models(const ModelsFile *mf) {
 }
 
 bool config_add_model(ModelsFile *mf, const ModelConfig *model) {
-  if (mf->count >= MAX_MODELS)
+  if (!mf || !model || mf->count >= MAX_MODELS)
     return false;
   mf->models[mf->count++] = *model;
   return true;
 }
 
 bool config_remove_model(ModelsFile *mf, size_t index) {
-  if (index >= mf->count)
+  if (!mf || index >= mf->count)
     return false;
   for (size_t i = index; i < mf->count - 1; i++) {
     mf->models[i] = mf->models[i + 1];
@@ -311,12 +313,14 @@ bool config_remove_model(ModelsFile *mf, size_t index) {
 }
 
 ModelConfig *config_get_active(ModelsFile *mf) {
-  if (mf->active_index < 0 || mf->active_index >= (int)mf->count)
+  if (!mf || mf->active_index < 0 || mf->active_index >= (int)mf->count)
     return NULL;
   return &mf->models[mf->active_index];
 }
 
 void config_set_active(ModelsFile *mf, size_t index) {
+  if (!mf)
+    return;
   if (index < mf->count) {
     mf->active_index = (int)index;
   }

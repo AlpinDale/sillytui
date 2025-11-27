@@ -5,6 +5,8 @@
 #include <string.h>
 
 static char *dup_string(const char *source) {
+  if (!source)
+    return NULL;
   size_t len = strlen(source) + 1;
   char *copy = malloc(len);
   if (copy) {
@@ -41,6 +43,8 @@ static void message_free(ChatMessage *msg) {
 }
 
 void history_init(ChatHistory *history) {
+  if (!history)
+    return;
   history->messages = NULL;
   history->count = 0;
   history->capacity = 0;
@@ -59,6 +63,8 @@ void history_free(ChatHistory *history) {
 }
 
 size_t history_add(ChatHistory *history, const char *message) {
+  if (!history)
+    return SIZE_MAX;
   if (history->count == history->capacity) {
     size_t new_capacity = history->capacity == 0 ? 8 : history->capacity * 2;
     ChatMessage *tmp =
@@ -104,7 +110,7 @@ size_t history_add(ChatHistory *history, const char *message) {
 }
 
 void history_update(ChatHistory *history, size_t index, const char *message) {
-  if (index >= history->count)
+  if (!history || index >= history->count)
     return;
 
   ChatMessage *msg = &history->messages[index];
@@ -120,7 +126,7 @@ void history_update(ChatHistory *history, size_t index, const char *message) {
 }
 
 const char *history_get(const ChatHistory *history, size_t index) {
-  if (index >= history->count)
+  if (!history || index >= history->count)
     return NULL;
 
   ChatMessage *msg = &history->messages[index];
@@ -132,7 +138,7 @@ const char *history_get(const ChatHistory *history, size_t index) {
 
 const char *history_get_swipe(const ChatHistory *history, size_t msg_index,
                               size_t swipe_index) {
-  if (msg_index >= history->count)
+  if (!history || msg_index >= history->count)
     return NULL;
 
   ChatMessage *msg = &history->messages[msg_index];
@@ -144,7 +150,7 @@ const char *history_get_swipe(const ChatHistory *history, size_t msg_index,
 
 void history_update_swipe(ChatHistory *history, size_t msg_index,
                           size_t swipe_index, const char *message) {
-  if (msg_index >= history->count)
+  if (!history || msg_index >= history->count)
     return;
 
   ChatMessage *msg = &history->messages[msg_index];
@@ -161,7 +167,7 @@ void history_update_swipe(ChatHistory *history, size_t msg_index,
 
 size_t history_add_swipe(ChatHistory *history, size_t msg_index,
                          const char *content) {
-  if (msg_index >= history->count)
+  if (!history || msg_index >= history->count)
     return SIZE_MAX;
 
   ChatMessage *msg = &history->messages[msg_index];
@@ -206,7 +212,7 @@ size_t history_add_swipe(ChatHistory *history, size_t msg_index,
 
 bool history_set_active_swipe(ChatHistory *history, size_t msg_index,
                               size_t swipe_index) {
-  if (msg_index >= history->count)
+  if (!history || msg_index >= history->count)
     return false;
 
   ChatMessage *msg = &history->messages[msg_index];
@@ -218,19 +224,19 @@ bool history_set_active_swipe(ChatHistory *history, size_t msg_index,
 }
 
 size_t history_get_swipe_count(const ChatHistory *history, size_t msg_index) {
-  if (msg_index >= history->count)
+  if (!history || msg_index >= history->count)
     return 0;
   return history->messages[msg_index].swipe_count;
 }
 
 size_t history_get_active_swipe(const ChatHistory *history, size_t msg_index) {
-  if (msg_index >= history->count)
+  if (!history || msg_index >= history->count)
     return 0;
   return history->messages[msg_index].active_swipe;
 }
 
 bool history_delete(ChatHistory *history, size_t index) {
-  if (index >= history->count)
+  if (!history || index >= history->count)
     return false;
 
   ChatMessage *msg = &history->messages[index];
@@ -252,7 +258,7 @@ bool history_delete(ChatHistory *history, size_t index) {
 
 void history_set_token_count(ChatHistory *history, size_t msg_index,
                              size_t swipe_index, int tokens) {
-  if (msg_index >= history->count)
+  if (!history || msg_index >= history->count)
     return;
   ChatMessage *msg = &history->messages[msg_index];
   if (swipe_index >= msg->swipe_count || !msg->token_counts)
@@ -262,7 +268,7 @@ void history_set_token_count(ChatHistory *history, size_t msg_index,
 
 int history_get_token_count(const ChatHistory *history, size_t msg_index,
                             size_t swipe_index) {
-  if (msg_index >= history->count)
+  if (!history || msg_index >= history->count)
     return 0;
   const ChatMessage *msg = &history->messages[msg_index];
   if (swipe_index >= msg->swipe_count || !msg->token_counts)
@@ -272,7 +278,7 @@ int history_get_token_count(const ChatHistory *history, size_t msg_index,
 
 void history_set_gen_time(ChatHistory *history, size_t msg_index,
                           size_t swipe_index, double time_ms) {
-  if (msg_index >= history->count)
+  if (!history || msg_index >= history->count)
     return;
   ChatMessage *msg = &history->messages[msg_index];
   if (swipe_index >= msg->swipe_count || !msg->gen_times)
@@ -282,7 +288,7 @@ void history_set_gen_time(ChatHistory *history, size_t msg_index,
 
 double history_get_gen_time(const ChatHistory *history, size_t msg_index,
                             size_t swipe_index) {
-  if (msg_index >= history->count)
+  if (!history || msg_index >= history->count)
     return 0.0;
   const ChatMessage *msg = &history->messages[msg_index];
   if (swipe_index >= msg->swipe_count || !msg->gen_times)
@@ -292,7 +298,7 @@ double history_get_gen_time(const ChatHistory *history, size_t msg_index,
 
 void history_set_output_tps(ChatHistory *history, size_t msg_index,
                             size_t swipe_index, double tps) {
-  if (msg_index >= history->count)
+  if (!history || msg_index >= history->count)
     return;
   ChatMessage *msg = &history->messages[msg_index];
   if (swipe_index >= msg->swipe_count || !msg->output_tps)
@@ -302,7 +308,7 @@ void history_set_output_tps(ChatHistory *history, size_t msg_index,
 
 double history_get_output_tps(const ChatHistory *history, size_t msg_index,
                               size_t swipe_index) {
-  if (msg_index >= history->count)
+  if (!history || msg_index >= history->count)
     return 0.0;
   const ChatMessage *msg = &history->messages[msg_index];
   if (swipe_index >= msg->swipe_count || !msg->output_tps)

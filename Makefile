@@ -1,10 +1,10 @@
 BUILD_DIR ?= build
-SRC_FILES := $(shell find src -name '*.c' -o -name '*.h')
+SRC_FILES := $(shell find src tests -name '*.c' -o -name '*.h')
 TOKENIZE_SRCS := examples/tokenize.c src/tokenizer/tiktoken.c src/tokenizer/gpt2bpe.c \
 	src/tokenizer/sentencepiece.c src/tokenizer/simd.c src/tokenizer/simd_arm64.S \
 	src/tokenizer/unicode_tables.c
 
-.PHONY: all configure build run clean distclean format tokenize example
+.PHONY: all configure build build-all run clean distclean format format-check tokenize example test
 
 all: build
 
@@ -12,6 +12,9 @@ configure:
 	cmake -S $(CURDIR) -B $(BUILD_DIR)
 
 build: configure
+	cmake --build $(BUILD_DIR) --target sillytui
+
+build-all: configure
 	cmake --build $(BUILD_DIR)
 
 run: build
@@ -26,6 +29,10 @@ distclean:
 format:
 	clang-format -i $(SRC_FILES)
 
+format-check:
+	@echo "Checking code formatting..."
+	@clang-format --dry-run --Werror $(SRC_FILES) && echo "All files properly formatted!" || (echo "Some files need formatting. Run 'make format' to fix." && exit 1)
+
 tokenize: $(BUILD_DIR)/tokenize
 
 $(BUILD_DIR)/tokenize: $(TOKENIZE_SRCS)
@@ -35,3 +42,5 @@ $(BUILD_DIR)/tokenize: $(TOKENIZE_SRCS)
 example: tokenize
 	@./$(BUILD_DIR)/tokenize $(ARGS)
 
+test: build-all
+	@./$(BUILD_DIR)/run_all_tests

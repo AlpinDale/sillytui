@@ -7,6 +7,8 @@
 #include <unistd.h>
 
 void sampler_init_defaults(SamplerSettings *s) {
+  if (!s)
+    return;
   memset(s, 0, sizeof(*s));
   s->temperature = 1.0;
   s->top_p = 1.0;
