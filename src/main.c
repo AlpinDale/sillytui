@@ -9,17 +9,17 @@
 #include <sys/time.h>
 #include <unistd.h>
 
-#include "character.h"
-#include "chat.h"
-#include "config.h"
-#include "history.h"
-#include "llm.h"
-#include "macros.h"
-#include "markdown.h"
-#include "modal.h"
-#include "persona.h"
-#include "sampler.h"
-#include "ui.h"
+#include "character/character.h"
+#include "character/persona.h"
+#include "chat/chat.h"
+#include "chat/history.h"
+#include "core/config.h"
+#include "core/macros.h"
+#include "llm/llm.h"
+#include "llm/sampler.h"
+#include "ui/markdown.h"
+#include "ui/modal.h"
+#include "ui/ui.h"
 
 #define INPUT_MAX 8192
 

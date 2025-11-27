@@ -1,5 +1,5 @@
 BUILD_DIR ?= build
-SRC_FILES := $(wildcard src/*.c src/*.h)
+SRC_FILES := $(shell find src -name '*.c' -o -name '*.h')
 
 .PHONY: all configure build run clean distclean format
 

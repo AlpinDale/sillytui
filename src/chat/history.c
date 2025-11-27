@@ -1,4 +1,4 @@
-#include "history.h"
+#include "chat/history.h"
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdlib.h>

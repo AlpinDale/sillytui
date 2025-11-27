@@ -1,7 +1,7 @@
 #ifndef CHAT_H
 #define CHAT_H
 
-#include "history.h"
+#include "chat/history.h"
 #include <stdbool.h>
 #include <time.h>
 

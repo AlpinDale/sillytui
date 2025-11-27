@@ -1,4 +1,4 @@
-#include "character.h"
+#include "character/character.h"
 #include <ctype.h>
 #include <pwd.h>
 #include <stdint.h>

@@ -1,7 +1,7 @@
 #ifndef SAMPLER_H
 #define SAMPLER_H
 
-#include "config.h"
+#include "core/config.h"
 #include <stdbool.h>
 
 #define MAX_CUSTOM_SAMPLERS 256

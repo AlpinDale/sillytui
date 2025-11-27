@@ -2,15 +2,16 @@
  * Example usage of the tokenizer.
  *
  * To compile (from the project root directory):
- * cc -O3 -o tokenize examples/tokenize.c src/tokenizer.c src/simd.c \
- *     src/simd_arm64.S src/unicode_tables.c -I.
+ * cc -O3 -o tokenize examples/tokenize.c src/tokenizer/tokenizer.c \
+ *     src/tokenizer/simd.c src/tokenizer/simd_arm64.S \
+ *     src/tokenizer/unicode_tables.c -Isrc
  *
  * Usage: ./tokenize <text>
  * Example: ./tokenize "Hello, world!"
  */
 
-#include "../src/simd.h"
-#include "../src/tokenizer.h"
+#include "tokenizer/simd.h"
+#include "tokenizer/tokenizer.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

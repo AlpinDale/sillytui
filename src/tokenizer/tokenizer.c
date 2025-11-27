@@ -1,6 +1,6 @@
-#include "tokenizer.h"
-#include "simd.h"
-#include "unicode_tables.h"
+#include "tokenizer/tokenizer.h"
+#include "tokenizer/simd.h"
+#include "tokenizer/unicode_tables.h"
 #include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>

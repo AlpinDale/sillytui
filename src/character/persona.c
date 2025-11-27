@@ -1,4 +1,4 @@
-#include "persona.h"
+#include "character/persona.h"
 #include <pwd.h>
 #include <stdio.h>
 #include <stdlib.h>

@@ -1,11 +1,11 @@
 #ifndef MODAL_H
 #define MODAL_H
 
-#include "character.h"
-#include "chat.h"
-#include "config.h"
-#include "persona.h"
-#include "sampler.h"
+#include "character/character.h"
+#include "character/persona.h"
+#include "chat/chat.h"
+#include "core/config.h"
+#include "llm/sampler.h"
 #include <curses.h>
 #include <stdbool.h>
 

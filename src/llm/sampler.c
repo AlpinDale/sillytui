@@ -1,4 +1,4 @@
-#include "sampler.h"
+#include "llm/sampler.h"
 #include <pwd.h>
 #include <stdio.h>
 #include <stdlib.h>

@@ -1,11 +1,11 @@
 #ifndef LLM_H
 #define LLM_H
 
-#include "character.h"
-#include "config.h"
-#include "history.h"
-#include "persona.h"
-#include "sampler.h"
+#include "character/character.h"
+#include "character/persona.h"
+#include "chat/history.h"
+#include "core/config.h"
+#include "llm/sampler.h"
 #include <stdbool.h>
 #include <stddef.h>
 

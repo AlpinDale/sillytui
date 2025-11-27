@@ -12,25 +12,25 @@ find_package(CURL REQUIRED)
 
 set(SOURCES
     src/main.c
-    src/history.c
-    src/markdown.c
-    src/ui.c
-    src/config.c
-    src/llm.c
-    src/modal.c
-    src/chat.c
-    src/character.c
-    src/persona.c
-    src/macros.c
-    src/sampler.c
-    src/tokenizer.c
-    src/simd.c
-    src/unicode_tables.c
+    src/core/config.c
+    src/core/macros.c
+    src/ui/ui.c
+    src/ui/modal.c
+    src/ui/markdown.c
+    src/chat/chat.c
+    src/chat/history.c
+    src/llm/llm.c
+    src/llm/sampler.c
+    src/character/character.c
+    src/character/persona.c
+    src/tokenizer/tokenizer.c
+    src/tokenizer/simd.c
+    src/tokenizer/unicode_tables.c
 )
 
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "arm64|aarch64")
     enable_language(ASM)
-    list(APPEND SOURCES src/simd_arm64.S)
+    list(APPEND SOURCES src/tokenizer/simd_arm64.S)
 endif()
 
 add_executable(sillytui ${SOURCES})

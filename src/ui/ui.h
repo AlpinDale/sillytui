@@ -1,7 +1,7 @@
 #ifndef UI_H
 #define UI_H
 
-#include "history.h"
+#include "chat/history.h"
 #include <curses.h>
 
 #define COLOR_PAIR_BORDER 10

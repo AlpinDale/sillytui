@@ -1,4 +1,4 @@
-#include "chat.h"
+#include "chat/chat.h"
 #include <ctype.h>
 #include <dirent.h>
 #include <errno.h>

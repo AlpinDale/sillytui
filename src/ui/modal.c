@@ -1,5 +1,5 @@
-#include "modal.h"
-#include "ui.h"
+#include "ui/modal.h"
+#include "ui/ui.h"
 #include <ctype.h>
 #include <stdlib.h>
 #include <string.h>

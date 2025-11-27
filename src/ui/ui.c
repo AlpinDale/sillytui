@@ -1,6 +1,6 @@
-#include "ui.h"
-#include "chat.h"
-#include "markdown.h"
+#include "ui/ui.h"
+#include "chat/chat.h"
+#include "ui/markdown.h"
 #include <ctype.h>
 #include <stdlib.h>
 #include <string.h>
