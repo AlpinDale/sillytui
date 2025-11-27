@@ -1,5 +1,5 @@
 /*
- * Example usage of the tokenizer library.
+ * Example usage of the tokenizer library with detailed timing.
  *
  * Supports multiple tokenizer formats:
  *   - tiktoken (OpenAI cl100k, o200k)
@@ -13,13 +13,12 @@
  *       src/tokenizer/simd_arm64.S src/tokenizer/unicode_tables.c -Isrc
  *
  * Usage:
- *   ./tokenize --tokenizer <name> <text>
+ *   ./tokenize --tokenizer <name> [--bench] <text>
  *   ./tokenize --list
  *
  * Examples:
  *   ./tokenize --tokenizer openai "Hello, world!"
- *   ./tokenize --tokenizer qwen3 "你好世界"
- *   ./tokenize --tokenizer llama3 "The quick brown fox"
+ *   ./tokenize --tokenizer llama3 --bench "The quick brown fox"
  */
 
 #include "tokenizer/gpt2bpe.h"
@@ -29,6 +28,11 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
+
+#ifdef __MACH__
+#include <mach/mach_time.h>
+#endif
 
 typedef enum {
   TOK_TYPE_TIKTOKEN,
@@ -59,12 +63,88 @@ static const TokenizerInfo TOKENIZERS[] = {
      "tokenizers/deepseek-r1/merges.txt", "DeepSeek R1 (128k vocab)"},
     {NULL, 0, NULL, NULL, NULL}};
 
+typedef struct {
+  double simd_init;
+  double load;
+  double encode;
+  double decode_total;
+  double cleanup;
+  int token_count;
+  size_t text_bytes;
+  size_t vocab_size;
+} TimingStats;
+
+static inline double get_time_ns(void) {
+#ifdef __MACH__
+  static mach_timebase_info_data_t tb;
+  if (tb.denom == 0)
+    mach_timebase_info(&tb);
+  return (double)mach_absolute_time() * tb.numer / tb.denom;
+#else
+  struct timespec ts;
+  clock_gettime(CLOCK_MONOTONIC, &ts);
+  return ts.tv_sec * 1e9 + ts.tv_nsec;
+#endif
+}
+
+static const char *format_time(double ns) {
+  static char buf[64];
+  if (ns < 1000) {
+    snprintf(buf, sizeof(buf), "%.1f ns", ns);
+  } else if (ns < 1000000) {
+    snprintf(buf, sizeof(buf), "%.2f µs", ns / 1000);
+  } else if (ns < 1000000000) {
+    snprintf(buf, sizeof(buf), "%.2f ms", ns / 1000000);
+  } else {
+    snprintf(buf, sizeof(buf), "%.2f s", ns / 1000000000);
+  }
+  return buf;
+}
+
+static void print_timing_stats(const TimingStats *stats,
+                               const TokenizerInfo *info) {
+  double total = stats->simd_init + stats->load + stats->encode +
+                 stats->decode_total + stats->cleanup;
+
+  printf("\n");
+  printf("⏱  Timing Breakdown\n");
+  printf("───────────────────────────────\n");
+  printf("  SIMD init:       %s\n", format_time(stats->simd_init));
+  printf("  Load tokenizer:  %s\n", format_time(stats->load));
+  printf("  Encode text:     %s\n", format_time(stats->encode));
+  printf("  Decode tokens:   %s\n", format_time(stats->decode_total));
+  printf("  Cleanup:         %s\n", format_time(stats->cleanup));
+  printf("───────────────────────────────\n");
+  printf("  Total:           %s\n", format_time(total));
+
+  if (stats->token_count > 0) {
+    double tokens_per_sec = stats->token_count / (stats->encode / 1e9);
+    double bytes_per_sec = stats->text_bytes / (stats->encode / 1e9);
+    double ns_per_token = stats->encode / stats->token_count;
+    double ns_per_byte = stats->encode / stats->text_bytes;
+
+    printf("\n");
+    printf("📊 Performance Stats\n");
+    printf("───────────────────────────────\n");
+    printf("  Tokenizer:       %s\n", info->name);
+    printf("  Vocab size:      %zu\n", stats->vocab_size);
+    printf("  Input:           %zu bytes\n", stats->text_bytes);
+    printf("  Output:          %d tokens\n", stats->token_count);
+    printf("───────────────────────────────\n");
+    printf("  Throughput:      %.0f tokens/s\n", tokens_per_sec);
+    printf("                   %.2f MB/s\n", bytes_per_sec / 1e6);
+    printf("  Latency/token:   %s\n", format_time(ns_per_token));
+    printf("  Latency/byte:    %s\n", format_time(ns_per_byte));
+  }
+}
+
 static void print_usage(const char *prog) {
   fprintf(stderr, "Usage:\n");
-  fprintf(stderr, "  %s --tokenizer <name> <text>\n", prog);
+  fprintf(stderr, "  %s --tokenizer <name> [--bench] <text>\n", prog);
   fprintf(stderr, "  %s --list\n\n", prog);
   fprintf(stderr, "Options:\n");
   fprintf(stderr, "  --tokenizer, -t  Tokenizer to use (see --list)\n");
+  fprintf(stderr, "  --bench, -b      Run benchmark (encode 1000x)\n");
   fprintf(stderr, "  --list, -l       List available tokenizers\n");
 }
 
@@ -98,12 +178,18 @@ int main(int argc, char *argv[]) {
 
   const char *tokenizer_name = NULL;
   int text_start = 1;
+  int bench_mode = 0;
 
   for (int i = 1; i < argc; i++) {
     if ((strcmp(argv[i], "--tokenizer") == 0 || strcmp(argv[i], "-t") == 0) &&
         i + 1 < argc) {
       tokenizer_name = argv[++i];
       text_start = i + 1;
+    } else if (strcmp(argv[i], "--bench") == 0 ||
+               strcmp(argv[i], "-b") == 0) {
+      bench_mode = 1;
+      if (text_start <= i)
+        text_start = i + 1;
     }
   }
 
@@ -125,6 +211,7 @@ int main(int argc, char *argv[]) {
   }
 
   char *text;
+  int needs_text_free = 0;
   if (text_start == argc - 1) {
     text = argv[text_start];
   } else {
@@ -143,21 +230,29 @@ int main(int argc, char *argv[]) {
         strcat(text, " ");
       strcat(text, argv[i]);
     }
+    needs_text_free = 1;
   }
 
+  TimingStats stats = {0};
+  stats.text_bytes = strlen(text);
+  double t0;
+
+  t0 = get_time_ns();
   simd_init();
+  stats.simd_init = get_time_ns() - t0;
 
   uint32_t tokens[4096];
   int token_count = 0;
-  int needs_text_free = (text_start != argc - 1);
 
   Tokenizer tiktoken;
   GPT2BPETokenizer gpt2bpe;
   SentencePieceProcessor sp;
 
   printf("Tokenizer: %s (%s)\n", info->name, info->description);
-  printf("Text: \"%s\"\n\n", text);
+  printf("Text: \"%s\"\n", text);
+  printf("Text length: %zu bytes\n", stats.text_bytes);
 
+  t0 = get_time_ns();
   switch (info->type) {
   case TOK_TYPE_TIKTOKEN:
     tokenizer_init(&tiktoken);
@@ -167,7 +262,7 @@ int main(int argc, char *argv[]) {
         free(text);
       return 1;
     }
-    token_count = tokenizer_encode(&tiktoken, text, tokens, 4096);
+    stats.vocab_size = tiktoken.count;
     break;
 
   case TOK_TYPE_GPT2BPE:
@@ -179,7 +274,7 @@ int main(int argc, char *argv[]) {
         free(text);
       return 1;
     }
-    token_count = gpt2_encode(&gpt2bpe, text, tokens, 4096);
+    stats.vocab_size = gpt2bpe.vocab_size;
     break;
 
   case TOK_TYPE_SENTENCEPIECE:
@@ -190,9 +285,59 @@ int main(int argc, char *argv[]) {
         free(text);
       return 1;
     }
-    token_count = sp_encode(&sp, text, tokens, 4096);
+    stats.vocab_size = sp.vocab_size;
     break;
   }
+  stats.load = get_time_ns() - t0;
+
+  if (bench_mode) {
+    printf("\nRunning benchmark (1M iterations)...\n");
+    for (int i = 0; i < 1000; i++) {
+      switch (info->type) {
+      case TOK_TYPE_TIKTOKEN:
+        tokenizer_encode(&tiktoken, text, tokens, 4096);
+        break;
+      case TOK_TYPE_GPT2BPE:
+        gpt2_encode(&gpt2bpe, text, tokens, 4096);
+        break;
+      case TOK_TYPE_SENTENCEPIECE:
+        sp_encode(&sp, text, tokens, 4096);
+        break;
+      }
+    }
+
+    t0 = get_time_ns();
+    for (int i = 0; i < 1000000; i++) {
+      switch (info->type) {
+      case TOK_TYPE_TIKTOKEN:
+        token_count = tokenizer_encode(&tiktoken, text, tokens, 4096);
+        break;
+      case TOK_TYPE_GPT2BPE:
+        token_count = gpt2_encode(&gpt2bpe, text, tokens, 4096);
+        break;
+      case TOK_TYPE_SENTENCEPIECE:
+        token_count = sp_encode(&sp, text, tokens, 4096);
+        break;
+      }
+    }
+    stats.encode = (get_time_ns() - t0) / 1000000.0;
+  } else {
+    t0 = get_time_ns();
+    switch (info->type) {
+    case TOK_TYPE_TIKTOKEN:
+      token_count = tokenizer_encode(&tiktoken, text, tokens, 4096);
+      break;
+    case TOK_TYPE_GPT2BPE:
+      token_count = gpt2_encode(&gpt2bpe, text, tokens, 4096);
+      break;
+    case TOK_TYPE_SENTENCEPIECE:
+      token_count = sp_encode(&sp, text, tokens, 4096);
+      break;
+    }
+    stats.encode = get_time_ns() - t0;
+  }
+
+  stats.token_count = token_count;
 
   if (token_count < 0) {
     fprintf(stderr, "Tokenization failed\n");
@@ -201,7 +346,7 @@ int main(int argc, char *argv[]) {
     return 1;
   }
 
-  printf("Token count: %d\n\n", token_count);
+  printf("\nToken count: %d\n\n", token_count);
 
   printf("Tokens: [");
   for (int i = 0; i < token_count; i++) {
@@ -212,6 +357,7 @@ int main(int argc, char *argv[]) {
   printf("]\n\n");
 
   printf("Decoded tokens:\n");
+  t0 = get_time_ns();
   for (int i = 0; i < token_count && i < 20; i++) {
     const char *piece = NULL;
     char *decoded = NULL;
@@ -245,10 +391,13 @@ int main(int argc, char *argv[]) {
     if (decoded)
       free(decoded);
   }
+  stats.decode_total = get_time_ns() - t0;
+
   if (token_count > 20) {
     printf("  ... (%d more tokens)\n", token_count - 20);
   }
 
+  t0 = get_time_ns();
   switch (info->type) {
   case TOK_TYPE_TIKTOKEN:
     tokenizer_free(&tiktoken);
@@ -260,6 +409,9 @@ int main(int argc, char *argv[]) {
     sp_free(&sp);
     break;
   }
+  stats.cleanup = get_time_ns() - t0;
+
+  print_timing_stats(&stats, info);
 
   if (needs_text_free)
     free(text);
