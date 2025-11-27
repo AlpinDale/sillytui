@@ -11,6 +11,16 @@ extern size_t simd_argmin_u32_arm64(const uint32_t *values, size_t count,
 extern size_t simd_match_ascii_letters_arm64(const uint8_t *data, size_t len);
 #endif
 
+#if SIMD_X86_64
+extern uint64_t simd_hash_bytes_x86_64(const uint8_t *bytes, size_t len);
+extern size_t simd_find_non_ascii_x86_64(const uint8_t *data, size_t len);
+extern bool simd_is_all_ascii_x86_64(const uint8_t *data, size_t len);
+extern size_t simd_count_utf8_chars_x86_64(const uint8_t *data, size_t len);
+extern size_t simd_argmin_u32_x86_64(const uint32_t *values, size_t count,
+                                     uint32_t *out_min);
+extern size_t simd_match_ascii_letters_x86_64(const uint8_t *data, size_t len);
+#endif
+
 static uint64_t hash_bytes_fallback(const uint8_t *bytes, size_t len) {
   uint64_t hash = 14695981039346656037ULL;
   for (size_t i = 0; i < len; i++) {
@@ -232,6 +242,8 @@ void simd_init(void) {
 
 #if SIMD_ARM64
   g_simd_available = true;
+#elif SIMD_X86_64
+  g_simd_available = true;
 #else
   g_simd_available = false;
 #endif
@@ -251,6 +263,13 @@ uint64_t simd_hash_bytes(const uint8_t *bytes, size_t len) {
     if (g_simd_available)
       return simd_hash_bytes_arm64(bytes, len);
   }
+#elif SIMD_X86_64
+  if (g_simd_available || !g_simd_initialized) {
+    if (!g_simd_initialized)
+      simd_init();
+    if (g_simd_available)
+      return simd_hash_bytes_x86_64(bytes, len);
+  }
 #endif
   return hash_bytes_fallback(bytes, len);
 }
@@ -262,6 +281,13 @@ size_t simd_find_non_ascii(const uint8_t *data, size_t len) {
       simd_init();
     if (g_simd_available)
       return simd_find_non_ascii_arm64(data, len);
+  }
+#elif SIMD_X86_64
+  if (g_simd_available || !g_simd_initialized) {
+    if (!g_simd_initialized)
+      simd_init();
+    if (g_simd_available)
+      return simd_find_non_ascii_x86_64(data, len);
   }
 #endif
   return find_non_ascii_fallback(data, len);
@@ -275,6 +301,13 @@ bool simd_is_all_ascii(const uint8_t *data, size_t len) {
     if (g_simd_available)
       return simd_is_all_ascii_arm64(data, len);
   }
+#elif SIMD_X86_64
+  if (g_simd_available || !g_simd_initialized) {
+    if (!g_simd_initialized)
+      simd_init();
+    if (g_simd_available)
+      return simd_is_all_ascii_x86_64(data, len);
+  }
 #endif
   return is_all_ascii_fallback(data, len);
 }
@@ -286,6 +319,13 @@ size_t simd_count_utf8_chars(const uint8_t *data, size_t len) {
       simd_init();
     if (g_simd_available)
       return simd_count_utf8_chars_arm64(data, len);
+  }
+#elif SIMD_X86_64
+  if (g_simd_available || !g_simd_initialized) {
+    if (!g_simd_initialized)
+      simd_init();
+    if (g_simd_available)
+      return simd_count_utf8_chars_x86_64(data, len);
   }
 #endif
   return count_utf8_chars_fallback(data, len);
@@ -300,6 +340,13 @@ size_t simd_argmin_u32(const uint32_t *values, size_t count,
     if (g_simd_available)
       return simd_argmin_u32_arm64(values, count, out_min);
   }
+#elif SIMD_X86_64
+  if (g_simd_available || !g_simd_initialized) {
+    if (!g_simd_initialized)
+      simd_init();
+    if (g_simd_available)
+      return simd_argmin_u32_x86_64(values, count, out_min);
+  }
 #endif
   return argmin_u32_fallback(values, count, out_min);
 }
@@ -311,6 +358,13 @@ size_t simd_match_ascii_letters(const uint8_t *data, size_t len) {
       simd_init();
     if (g_simd_available)
       return simd_match_ascii_letters_arm64(data, len);
+  }
+#elif SIMD_X86_64
+  if (g_simd_available || !g_simd_initialized) {
+    if (!g_simd_initialized)
+      simd_init();
+    if (g_simd_available)
+      return simd_match_ascii_letters_x86_64(data, len);
   }
 #endif
   return match_ascii_letters_fallback(data, len);

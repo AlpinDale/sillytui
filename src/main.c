@@ -541,7 +541,7 @@ static bool handle_slash_command(const char *input, Modal *modal,
   }
   if (strcmp(input, "/note") == 0) {
     if (author_note->text[0]) {
-      char msg[512];
+      char msg[4200];
       snprintf(msg, sizeof(msg),
                "Author's Note:\n\n\"%s\"\n\n"
                "Depth: %d  |  Position: %s  |  Role: %s",

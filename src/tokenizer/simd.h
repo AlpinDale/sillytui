@@ -7,8 +7,13 @@
 
 #if defined(__aarch64__) || defined(_M_ARM64)
 #define SIMD_ARM64 1
+#define SIMD_X86_64 0
+#elif defined(__x86_64__) || defined(_M_X64)
+#define SIMD_ARM64 0
+#define SIMD_X86_64 1
 #else
 #define SIMD_ARM64 0
+#define SIMD_X86_64 0
 #endif
 
 uint64_t simd_hash_bytes(const uint8_t *bytes, size_t len);
