@@ -467,6 +467,106 @@ TEST(message_role_out_of_bounds) {
   PASS();
 }
 
+TEST(history_move_up_basic) {
+  ChatHistory h;
+  history_init(&h);
+  history_add_with_role(&h, "First", ROLE_ASSISTANT);
+  history_add_with_role(&h, "Second", ROLE_USER);
+  history_add_with_role(&h, "Third", ROLE_SYSTEM);
+
+  bool moved = history_move_up(&h, 2);
+  ASSERT_TRUE(moved);
+  ASSERT_EQ_STR("First", history_get(&h, 0));
+  ASSERT_EQ_STR("Third", history_get(&h, 1));
+  ASSERT_EQ_STR("Second", history_get(&h, 2));
+  ASSERT_EQ_INT(ROLE_SYSTEM, history_get_role(&h, 1));
+  ASSERT_EQ_INT(ROLE_USER, history_get_role(&h, 2));
+
+  history_free(&h);
+  PASS();
+}
+
+TEST(history_move_down_basic) {
+  ChatHistory h;
+  history_init(&h);
+  history_add_with_role(&h, "First", ROLE_ASSISTANT);
+  history_add_with_role(&h, "Second", ROLE_USER);
+  history_add_with_role(&h, "Third", ROLE_SYSTEM);
+
+  bool moved = history_move_down(&h, 0);
+  ASSERT_TRUE(moved);
+  ASSERT_EQ_STR("Second", history_get(&h, 0));
+  ASSERT_EQ_STR("First", history_get(&h, 1));
+  ASSERT_EQ_STR("Third", history_get(&h, 2));
+  ASSERT_EQ_INT(ROLE_USER, history_get_role(&h, 0));
+  ASSERT_EQ_INT(ROLE_ASSISTANT, history_get_role(&h, 1));
+
+  history_free(&h);
+  PASS();
+}
+
+TEST(history_move_up_at_top) {
+  ChatHistory h;
+  history_init(&h);
+  history_add(&h, "First");
+  history_add(&h, "Second");
+
+  bool moved = history_move_up(&h, 0);
+  ASSERT_FALSE(moved);
+  ASSERT_EQ_STR("First", history_get(&h, 0));
+  ASSERT_EQ_STR("Second", history_get(&h, 1));
+
+  history_free(&h);
+  PASS();
+}
+
+TEST(history_move_down_at_bottom) {
+  ChatHistory h;
+  history_init(&h);
+  history_add(&h, "First");
+  history_add(&h, "Second");
+
+  bool moved = history_move_down(&h, 1);
+  ASSERT_FALSE(moved);
+  ASSERT_EQ_STR("First", history_get(&h, 0));
+  ASSERT_EQ_STR("Second", history_get(&h, 1));
+
+  history_free(&h);
+  PASS();
+}
+
+TEST(history_move_null_safety) {
+  ASSERT_FALSE(history_move_up(NULL, 0));
+  ASSERT_FALSE(history_move_down(NULL, 0));
+
+  ChatHistory h;
+  history_init(&h);
+  ASSERT_FALSE(history_move_up(&h, 0));
+  ASSERT_FALSE(history_move_down(&h, 0));
+  history_free(&h);
+  PASS();
+}
+
+TEST(history_move_preserves_swipes) {
+  ChatHistory h;
+  history_init(&h);
+  history_add_with_role(&h, "Bot response 1", ROLE_ASSISTANT);
+  history_add_swipe(&h, 0, "Bot response alt");
+  history_add(&h, "User msg");
+
+  bool moved = history_move_down(&h, 0);
+  ASSERT_TRUE(moved);
+
+  ASSERT_EQ_STR("User msg", history_get(&h, 0));
+  ASSERT_EQ_SIZE(2, history_get_swipe_count(&h, 1));
+  ASSERT_EQ_STR("Bot response 1", history_get_swipe(&h, 1, 0));
+  ASSERT_EQ_STR("Bot response alt", history_get_swipe(&h, 1, 1));
+  ASSERT_EQ_SIZE(1, history_get_active_swipe(&h, 1));
+
+  history_free(&h);
+  PASS();
+}
+
 void run_robustness_tests(void) {
   TEST_SUITE("Robustness Tests");
   RUN_TEST(robust_history_very_long_message);
@@ -506,4 +606,10 @@ void run_robustness_tests(void) {
   RUN_TEST(message_role_from_string);
   RUN_TEST(message_role_null_safety);
   RUN_TEST(message_role_out_of_bounds);
+  RUN_TEST(history_move_up_basic);
+  RUN_TEST(history_move_down_basic);
+  RUN_TEST(history_move_up_at_top);
+  RUN_TEST(history_move_down_at_bottom);
+  RUN_TEST(history_move_null_safety);
+  RUN_TEST(history_move_preserves_swipes);
 }

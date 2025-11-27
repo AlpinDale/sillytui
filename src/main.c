@@ -468,7 +468,10 @@ static bool handle_slash_command(const char *input, Modal *modal,
                        "/quit              - Exit\n"
                        "\n"
                        "Shortcuts:\n"
-                       "Up/Down            - Scroll chat\n"
+                       "↑/↓                - Navigate messages\n"
+                       "m                  - Move selected message\n"
+                       "e                  - Edit message\n"
+                       "d                  - Delete message\n"
                        "Esc                - Close / Exit",
                        false);
     return true;
@@ -566,6 +569,7 @@ int main(void) {
   int input_scroll_line = 0;
   int selected_msg = MSG_SELECT_NONE;
   bool input_focused = true;
+  bool move_mode = false;
   bool running = true;
   char current_chat_id[CHAT_ID_MAX] = {0};
   char current_char_path[CHAT_CHAR_PATH_MAX] = {0};
@@ -769,7 +773,13 @@ int main(void) {
         in_place_edit.active = false;
         ui_draw_chat_ex(chat_win, &history, selected_msg,
                         get_model_name(&models), user_disp, bot_disp, true,
-                        NULL);
+                        move_mode, NULL);
+        continue;
+      }
+      if (move_mode) {
+        move_mode = false;
+        ui_draw_chat(chat_win, &history, selected_msg, get_model_name(&models),
+                     user_disp, bot_disp, !input_focused);
         continue;
       }
       if (suggestion_box_is_open(&suggestions)) {
@@ -944,7 +954,7 @@ int main(void) {
           }
           ui_draw_chat_ex(chat_win, &history, selected_msg,
                           get_model_name(&models), user_disp, bot_disp, false,
-                          &in_place_edit);
+                          move_mode, &in_place_edit);
         }
         continue;
       }
@@ -966,7 +976,15 @@ int main(void) {
       }
       if (history.count == 0)
         continue;
-      if (input_focused) {
+      if (move_mode && selected_msg >= 0) {
+        if (history_move_up(&history, selected_msg)) {
+          selected_msg--;
+          const char *char_name =
+              (character_loaded && character.name[0]) ? character.name : NULL;
+          chat_auto_save(&history, current_chat_id, CHAT_ID_MAX,
+                         current_char_path, char_name);
+        }
+      } else if (input_focused) {
         selected_msg = (int)history.count - 1;
         input_focused = false;
       } else if (selected_msg > 0) {
@@ -1031,7 +1049,7 @@ int main(void) {
         }
         ui_draw_chat_ex(chat_win, &history, selected_msg,
                         get_model_name(&models), user_disp, bot_disp, false,
-                        &in_place_edit);
+                        move_mode, &in_place_edit);
         continue;
       }
       if (input_focused && input_len > 0) {
@@ -1054,7 +1072,15 @@ int main(void) {
       }
       if (selected_msg == MSG_SELECT_NONE)
         continue;
-      if (selected_msg < (int)history.count - 1) {
+      if (move_mode && selected_msg >= 0) {
+        if (history_move_down(&history, selected_msg)) {
+          selected_msg++;
+          const char *char_name =
+              (character_loaded && character.name[0]) ? character.name : NULL;
+          chat_auto_save(&history, current_chat_id, CHAT_ID_MAX,
+                         current_char_path, char_name);
+        }
+      } else if (selected_msg < (int)history.count - 1) {
         selected_msg++;
       } else {
         selected_msg = MSG_SELECT_NONE;
@@ -1073,7 +1099,7 @@ int main(void) {
           in_place_edit.cursor_pos--;
           ui_draw_chat_ex(chat_win, &history, selected_msg,
                           get_model_name(&models), user_disp, bot_disp, false,
-                          &in_place_edit);
+                          move_mode, &in_place_edit);
         }
         continue;
       }
@@ -1107,7 +1133,7 @@ int main(void) {
           in_place_edit.cursor_pos++;
           ui_draw_chat_ex(chat_win, &history, selected_msg,
                           get_model_name(&models), user_disp, bot_disp, false,
-                          &in_place_edit);
+                          move_mode, &in_place_edit);
         }
         continue;
       }
@@ -1259,7 +1285,7 @@ int main(void) {
 
         ui_draw_chat_ex(chat_win, &history, selected_msg,
                         get_model_name(&models), user_disp, bot_disp, false,
-                        &in_place_edit);
+                        move_mode, &in_place_edit);
       }
       continue;
     }
@@ -1279,7 +1305,7 @@ int main(void) {
         in_place_edit.active = false;
         ui_draw_chat_ex(chat_win, &history, selected_msg,
                         get_model_name(&models), user_disp, bot_disp, true,
-                        NULL);
+                        move_mode, NULL);
 
         const char *char_name =
             (character_loaded && character.name[0]) ? character.name : NULL;
@@ -1296,7 +1322,7 @@ int main(void) {
           in_place_edit.buf_len--;
           ui_draw_chat_ex(chat_win, &history, selected_msg,
                           get_model_name(&models), user_disp, bot_disp, false,
-                          &in_place_edit);
+                          move_mode, &in_place_edit);
         }
         continue;
       }
@@ -1308,7 +1334,7 @@ int main(void) {
           in_place_edit.buf_len--;
           ui_draw_chat_ex(chat_win, &history, selected_msg,
                           get_model_name(&models), user_disp, bot_disp, false,
-                          &in_place_edit);
+                          move_mode, &in_place_edit);
         }
         continue;
       }
@@ -1322,7 +1348,7 @@ int main(void) {
           in_place_edit.buf_len++;
           ui_draw_chat_ex(chat_win, &history, selected_msg,
                           get_model_name(&models), user_disp, bot_disp, false,
-                          &in_place_edit);
+                          move_mode, &in_place_edit);
         }
         continue;
       }
@@ -1330,9 +1356,18 @@ int main(void) {
     }
 
     if (ch == 'd' && !input_focused && selected_msg >= 0 &&
-        selected_msg < (int)history.count && !in_place_edit.active) {
+        selected_msg < (int)history.count && !in_place_edit.active &&
+        !move_mode) {
       modal_open_message_delete(&modal, selected_msg);
       modal_draw(&modal, &models);
+      continue;
+    }
+
+    if (ch == 'm' && !input_focused && selected_msg >= 0 &&
+        selected_msg < (int)history.count && !in_place_edit.active) {
+      move_mode = !move_mode;
+      ui_draw_chat(chat_win, &history, selected_msg, get_model_name(&models),
+                   user_disp, bot_disp, !input_focused);
       continue;
     }
 
@@ -1341,6 +1376,12 @@ int main(void) {
       suggestion_box_close(&suggestions);
 
       if (!input_focused) {
+        if (move_mode) {
+          move_mode = false;
+          ui_draw_chat(chat_win, &history, selected_msg,
+                       get_model_name(&models), user_disp, bot_disp, true);
+          continue;
+        }
         selected_msg = MSG_SELECT_NONE;
         input_focused = true;
         ui_draw_chat(chat_win, &history, selected_msg, get_model_name(&models),

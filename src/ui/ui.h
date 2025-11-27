@@ -73,9 +73,9 @@ void ui_layout_windows_with_input(WINDOW **chat_win, WINDOW **input_win,
 void ui_draw_chat_ex(WINDOW *chat_win, const ChatHistory *history,
                      int selected_msg, const char *model_name,
                      const char *user_name, const char *bot_name,
-                     bool show_edit_hints, InPlaceEdit *edit);
+                     bool show_edit_hints, bool move_mode, InPlaceEdit *edit);
 #define ui_draw_chat(w, h, s, m, u, b, e)                                      \
-  ui_draw_chat_ex(w, h, s, m, u, b, e, NULL)
+  ui_draw_chat_ex(w, h, s, m, u, b, e, false, NULL)
 void ui_draw_input_multiline(WINDOW *input_win, const char *buffer,
                              int cursor_pos, bool focused, int scroll_line,
                              bool editing_mode);

@@ -62,4 +62,7 @@ void history_set_role(ChatHistory *history, size_t index, MessageRole role);
 const char *role_to_string(MessageRole role);
 MessageRole role_from_string(const char *str);
 
+bool history_move_up(ChatHistory *history, size_t index);
+bool history_move_down(ChatHistory *history, size_t index);
+
 #endif

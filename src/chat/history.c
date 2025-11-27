@@ -360,3 +360,23 @@ MessageRole role_from_string(const char *str) {
     return ROLE_SYSTEM;
   return ROLE_USER;
 }
+
+bool history_move_up(ChatHistory *history, size_t index) {
+  if (!history || history->count == 0 || index == 0 || index >= history->count)
+    return false;
+
+  ChatMessage temp = history->messages[index];
+  history->messages[index] = history->messages[index - 1];
+  history->messages[index - 1] = temp;
+  return true;
+}
+
+bool history_move_down(ChatHistory *history, size_t index) {
+  if (!history || history->count == 0 || index >= history->count - 1)
+    return false;
+
+  ChatMessage temp = history->messages[index];
+  history->messages[index] = history->messages[index + 1];
+  history->messages[index + 1] = temp;
+  return true;
+}

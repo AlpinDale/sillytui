@@ -443,7 +443,7 @@ int ui_get_msg_scroll_offset(WINDOW *chat_win, const ChatHistory *history,
 void ui_draw_chat_ex(WINDOW *chat_win, const ChatHistory *history,
                      int selected_msg, const char *model_name,
                      const char *user_name, const char *bot_name,
-                     bool show_edit_hints, InPlaceEdit *edit) {
+                     bool show_edit_hints, bool move_mode, InPlaceEdit *edit) {
   if (!user_name || !user_name[0])
     user_name = "You";
   if (!bot_name || !bot_name[0])
@@ -469,10 +469,17 @@ void ui_draw_chat_ex(WINDOW *chat_win, const ChatHistory *history,
     mvwaddstr(chat_win, height - 1, 3, " Enter:save  Esc:cancel ");
     if (g_ui_colors)
       wattroff(chat_win, COLOR_PAIR(COLOR_PAIR_HINT) | A_DIM);
+  } else if (move_mode && selected_msg >= 0) {
+    if (g_ui_colors)
+      wattron(chat_win, COLOR_PAIR(COLOR_PAIR_HINT) | A_DIM);
+    mvwaddstr(chat_win, height - 1, 3, " ↑/↓:move  Enter/Esc:done ");
+    if (g_ui_colors)
+      wattroff(chat_win, COLOR_PAIR(COLOR_PAIR_HINT) | A_DIM);
   } else if (show_edit_hints && selected_msg >= 0) {
     if (g_ui_colors)
       wattron(chat_win, COLOR_PAIR(COLOR_PAIR_HINT) | A_DIM);
-    mvwaddstr(chat_win, height - 1, 3, " e:edit  d:delete  Enter:deselect ");
+    mvwaddstr(chat_win, height - 1, 3,
+              " e:edit  d:delete  m:move  Enter:deselect ");
     if (g_ui_colors)
       wattroff(chat_win, COLOR_PAIR(COLOR_PAIR_HINT) | A_DIM);
   }
