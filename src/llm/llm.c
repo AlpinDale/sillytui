@@ -284,7 +284,8 @@ LLMResponse llm_chat(const ModelConfig *config, const ChatHistory *history,
                    .got_content = false,
                    .prompt_tokens = 0,
                    .completion_tokens = 0,
-                   .is_anthropic = (config->api_type == API_TYPE_ANTHROPIC)};
+                   .is_anthropic = (config->api_type == API_TYPE_ANTHROPIC),
+                   .has_first_token = false};
 
   curl_easy_setopt(curl, CURLOPT_URL, url);
   curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
@@ -335,6 +336,15 @@ LLMResponse llm_chat(const ModelConfig *config, const ChatHistory *history,
   resp.prompt_tokens = ctx.prompt_tokens;
   resp.completion_tokens = ctx.completion_tokens;
   resp.elapsed_ms = elapsed_ms;
+
+  if (ctx.has_first_token && ctx.completion_tokens > 0) {
+    double output_time_ms =
+        (ctx.last_token_time.tv_sec - ctx.first_token_time.tv_sec) * 1000.0 +
+        (ctx.last_token_time.tv_usec - ctx.first_token_time.tv_usec) / 1000.0;
+    if (output_time_ms > 0) {
+      resp.output_tps = (ctx.completion_tokens * 1000.0) / output_time_ms;
+    }
+  }
 
   curl_slist_free_all(headers);
   curl_easy_cleanup(curl);

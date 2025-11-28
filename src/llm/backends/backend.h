@@ -9,6 +9,7 @@
 #include "llm/sampler.h"
 #include <stdbool.h>
 #include <stddef.h>
+#include <sys/time.h>
 
 typedef struct {
   const char *content;
@@ -48,6 +49,9 @@ typedef struct {
   int prompt_tokens;
   int completion_tokens;
   bool is_anthropic;
+  struct timeval first_token_time;
+  struct timeval last_token_time;
+  bool has_first_token;
 } StreamCtx;
 
 typedef struct LLMBackend {

@@ -453,6 +453,11 @@ static void openai_parse_stream(StreamCtx *ctx, const char *line) {
 
   char *content = find_json_string(delta, "content");
   if (content && content[0]) {
+    if (!ctx->has_first_token) {
+      gettimeofday(&ctx->first_token_time, NULL);
+      ctx->has_first_token = true;
+    }
+    gettimeofday(&ctx->last_token_time, NULL);
     ctx->got_content = true;
     append_to_response(ctx->resp, content, strlen(content));
     if (ctx->cb) {
