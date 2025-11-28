@@ -34,4 +34,15 @@ size_t simd_base64_decode(const char *input, size_t input_len, uint8_t *output,
 void simd_init(void);
 bool simd_available(void);
 
+// Fallback implementations (non-SIMD) - exposed for testing
+uint64_t hash_bytes_fallback(const uint8_t *bytes, size_t len);
+size_t find_non_ascii_fallback(const uint8_t *data, size_t len);
+bool is_all_ascii_fallback(const uint8_t *data, size_t len);
+size_t count_utf8_chars_fallback(const uint8_t *data, size_t len);
+size_t argmin_u32_fallback(const uint32_t *values, size_t count,
+                           uint32_t *out_min);
+size_t match_ascii_letters_fallback(const uint8_t *data, size_t len);
+size_t base64_decode_fallback(const char *input, size_t input_len,
+                              uint8_t *output, size_t output_cap);
+
 #endif

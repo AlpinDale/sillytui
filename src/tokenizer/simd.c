@@ -21,7 +21,8 @@ extern size_t simd_argmin_u32_x86_64(const uint32_t *values, size_t count,
 extern size_t simd_match_ascii_letters_x86_64(const uint8_t *data, size_t len);
 #endif
 
-static uint64_t hash_bytes_fallback(const uint8_t *bytes, size_t len) {
+// Fallback implementations (non-SIMD) - exported for testing
+uint64_t hash_bytes_fallback(const uint8_t *bytes, size_t len) {
   uint64_t hash = 14695981039346656037ULL;
   for (size_t i = 0; i < len; i++) {
     hash ^= bytes[i];
@@ -30,7 +31,7 @@ static uint64_t hash_bytes_fallback(const uint8_t *bytes, size_t len) {
   return hash;
 }
 
-static size_t find_non_ascii_fallback(const uint8_t *data, size_t len) {
+size_t find_non_ascii_fallback(const uint8_t *data, size_t len) {
   for (size_t i = 0; i < len; i++) {
     if (data[i] >= 0x80)
       return i;
@@ -38,7 +39,7 @@ static size_t find_non_ascii_fallback(const uint8_t *data, size_t len) {
   return len;
 }
 
-static bool is_all_ascii_fallback(const uint8_t *data, size_t len) {
+bool is_all_ascii_fallback(const uint8_t *data, size_t len) {
   for (size_t i = 0; i < len; i++) {
     if (data[i] >= 0x80)
       return false;
@@ -46,7 +47,7 @@ static bool is_all_ascii_fallback(const uint8_t *data, size_t len) {
   return true;
 }
 
-static size_t count_utf8_chars_fallback(const uint8_t *data, size_t len) {
+size_t count_utf8_chars_fallback(const uint8_t *data, size_t len) {
   size_t count = 0;
   for (size_t i = 0; i < len; i++) {
     if ((data[i] & 0xC0) != 0x80)
@@ -55,8 +56,8 @@ static size_t count_utf8_chars_fallback(const uint8_t *data, size_t len) {
   return count;
 }
 
-static size_t argmin_u32_fallback(const uint32_t *values, size_t count,
-                                  uint32_t *out_min) {
+size_t argmin_u32_fallback(const uint32_t *values, size_t count,
+                           uint32_t *out_min) {
   if (count == 0) {
     *out_min = UINT32_MAX;
     return 0;
@@ -77,7 +78,7 @@ static inline bool is_ascii_letter(uint8_t b) {
   return (b >= 'A' && b <= 'Z') || (b >= 'a' && b <= 'z');
 }
 
-static size_t match_ascii_letters_fallback(const uint8_t *data, size_t len) {
+size_t match_ascii_letters_fallback(const uint8_t *data, size_t len) {
   size_t i = 0;
   while (i < len && is_ascii_letter(data[i]))
     i++;
@@ -98,8 +99,8 @@ static inline int base64_char_to_val(char c) {
   return -1;
 }
 
-static size_t base64_decode_fallback(const char *input, size_t input_len,
-                                     uint8_t *output, size_t output_cap) {
+size_t base64_decode_fallback(const char *input, size_t input_len,
+                              uint8_t *output, size_t output_cap) {
   size_t out_len = 0;
   uint32_t accum = 0;
   int bits = 0;
@@ -188,6 +189,143 @@ static size_t base64_decode_neon(const char *input, size_t input_len,
     out_pos += 12;
   }
 
+  while (in_pos < input_len && out_pos < output_cap) {
+    if (input[in_pos] == '=')
+      break;
+    int v0 = base64_char_to_val(input[in_pos]);
+    if (v0 < 0) {
+      in_pos++;
+      continue;
+    }
+    if (in_pos + 1 >= input_len)
+      break;
+    int v1 = base64_char_to_val(input[in_pos + 1]);
+    if (v1 < 0) {
+      in_pos++;
+      continue;
+    }
+
+    output[out_pos++] = (v0 << 2) | (v1 >> 4);
+    in_pos += 2;
+
+    if (in_pos >= input_len || input[in_pos] == '=' || out_pos >= output_cap)
+      break;
+    int v2 = base64_char_to_val(input[in_pos]);
+    if (v2 < 0) {
+      in_pos++;
+      continue;
+    }
+    output[out_pos++] = (v1 << 4) | (v2 >> 2);
+    in_pos++;
+
+    if (in_pos >= input_len || input[in_pos] == '=' || out_pos >= output_cap)
+      break;
+    int v3 = base64_char_to_val(input[in_pos]);
+    if (v3 < 0) {
+      in_pos++;
+      continue;
+    }
+    output[out_pos++] = (v2 << 6) | v3;
+    in_pos++;
+  }
+
+  return out_pos;
+}
+#endif
+
+#if SIMD_X86_64
+#include <immintrin.h>
+
+static size_t base64_decode_x86_64(const char *input, size_t input_len,
+                                  uint8_t *output, size_t output_cap) {
+  size_t in_pos = 0;
+  size_t out_pos = 0;
+
+  // Lookup tables for base64 decoding (duplicated for 32 bytes)
+  static const int8_t lut_lo[] = {
+      0x15, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11,
+      0x11, 0x11, 0x13, 0x1A, 0x1B, 0x1B, 0x1B, 0x1A,
+      0x15, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11,
+      0x11, 0x11, 0x13, 0x1A, 0x1B, 0x1B, 0x1B, 0x1A};
+  static const int8_t lut_hi[] = {
+      0x10, 0x10, 0x01, 0x02, 0x04, 0x08, 0x04, 0x08,
+      0x10, 0x10, 0x10, 0x10, 0x10, 0x10, 0x10, 0x10,
+      0x10, 0x10, 0x01, 0x02, 0x04, 0x08, 0x04, 0x08,
+      0x10, 0x10, 0x10, 0x10, 0x10, 0x10, 0x10, 0x10};
+  static const int8_t lut_roll[] = {
+      0, 16, 19, 4, -65, -65, -71, -71, 0, 0, 0, 0, 0, 0, 0, 0,
+      0, 16, 19, 4, -65, -65, -71, -71, 0, 0, 0, 0, 0, 0, 0, 0};
+
+  __m256i v_lut_lo = _mm256_loadu_si256((const __m256i *)lut_lo);
+  __m256i v_lut_hi = _mm256_loadu_si256((const __m256i *)lut_hi);
+  __m256i v_lut_roll = _mm256_loadu_si256((const __m256i *)lut_roll);
+  __m256i v_2f = _mm256_set1_epi8(0x2F);
+
+  // Process 32 bytes at a time using AVX2
+  while (in_pos + 32 <= input_len && out_pos + 24 <= output_cap) {
+    __m256i v_in = _mm256_loadu_si256((const __m256i *)(input + in_pos));
+
+    // Check for '=' padding
+    __m256i has_eq = _mm256_cmpeq_epi8(v_in, _mm256_set1_epi8('='));
+    if (_mm256_movemask_epi8(has_eq))
+      break;
+
+    // Extract high and low nibbles
+    __m256i hi_nibbles = _mm256_and_si256(_mm256_srli_epi16(v_in, 4), _mm256_set1_epi8(0x0F));
+    __m256i lo_nibbles = _mm256_and_si256(v_in, _mm256_set1_epi8(0x0F));
+
+    // Lookup validation bits
+    __m256i lo = _mm256_shuffle_epi8(v_lut_lo, lo_nibbles);
+    __m256i hi = _mm256_shuffle_epi8(v_lut_hi, hi_nibbles);
+
+    // Check for invalid characters
+    __m256i check = _mm256_and_si256(lo, hi);
+    if (_mm256_movemask_epi8(check))
+      break;
+
+    // Calculate roll offset
+    __m256i eq_2f = _mm256_cmpeq_epi8(v_in, v_2f);
+    __m256i roll_idx = _mm256_sub_epi8(hi_nibbles, eq_2f);
+    __m256i roll = _mm256_shuffle_epi8(v_lut_roll, roll_idx);
+
+    // Decode
+    __m256i decoded = _mm256_add_epi8(v_in, roll);
+
+    // Extract to temporary buffer and pack output
+    uint8_t tmp[32];
+    _mm256_storeu_si256((__m256i *)tmp, decoded);
+
+    // Pack 32 6-bit values into 24 8-bit values
+    output[out_pos + 0] = (tmp[0] << 2) | (tmp[1] >> 4);
+    output[out_pos + 1] = (tmp[1] << 4) | (tmp[2] >> 2);
+    output[out_pos + 2] = (tmp[2] << 6) | tmp[3];
+    output[out_pos + 3] = (tmp[4] << 2) | (tmp[5] >> 4);
+    output[out_pos + 4] = (tmp[5] << 4) | (tmp[6] >> 2);
+    output[out_pos + 5] = (tmp[6] << 6) | tmp[7];
+    output[out_pos + 6] = (tmp[8] << 2) | (tmp[9] >> 4);
+    output[out_pos + 7] = (tmp[9] << 4) | (tmp[10] >> 2);
+    output[out_pos + 8] = (tmp[10] << 6) | tmp[11];
+    output[out_pos + 9] = (tmp[12] << 2) | (tmp[13] >> 4);
+    output[out_pos + 10] = (tmp[13] << 4) | (tmp[14] >> 2);
+    output[out_pos + 11] = (tmp[14] << 6) | tmp[15];
+    output[out_pos + 12] = (tmp[16] << 2) | (tmp[17] >> 4);
+    output[out_pos + 13] = (tmp[17] << 4) | (tmp[18] >> 2);
+    output[out_pos + 14] = (tmp[18] << 6) | tmp[19];
+    output[out_pos + 15] = (tmp[20] << 2) | (tmp[21] >> 4);
+    output[out_pos + 16] = (tmp[21] << 4) | (tmp[22] >> 2);
+    output[out_pos + 17] = (tmp[22] << 6) | tmp[23];
+    output[out_pos + 18] = (tmp[24] << 2) | (tmp[25] >> 4);
+    output[out_pos + 19] = (tmp[25] << 4) | (tmp[26] >> 2);
+    output[out_pos + 20] = (tmp[26] << 6) | tmp[27];
+    output[out_pos + 21] = (tmp[28] << 2) | (tmp[29] >> 4);
+    output[out_pos + 22] = (tmp[29] << 4) | (tmp[30] >> 2);
+    output[out_pos + 23] = (tmp[30] << 6) | tmp[31];
+
+    in_pos += 32;
+    out_pos += 24;
+  }
+
+  // Scalar fallback for remaining bytes
   while (in_pos < input_len && out_pos < output_cap) {
     if (input[in_pos] == '=')
       break;
@@ -348,13 +486,16 @@ size_t simd_match_ascii_letters(const uint8_t *data, size_t len) {
 
 size_t simd_base64_decode(const char *input, size_t input_len, uint8_t *output,
                           size_t output_cap) {
-#if SIMD_ARM64
   if (g_simd_available || !g_simd_initialized) {
     if (!g_simd_initialized)
       simd_init();
-    if (g_simd_available)
+    if (g_simd_available) {
+#if SIMD_ARM64
       return base64_decode_neon(input, input_len, output, output_cap);
-  }
+#elif SIMD_X86_64
+      return base64_decode_x86_64(input, input_len, output, output_cap);
 #endif
+    }
+  }
   return base64_decode_fallback(input, input_len, output, output_cap);
 }

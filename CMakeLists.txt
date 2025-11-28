@@ -7,6 +7,11 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 add_compile_options(-Wall -Wextra -Werror)
 
+# Enable AVX2 for x86_64
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
+    add_compile_options(-march=x86-64-v3)
+endif()
+
 find_package(Curses REQUIRED)
 find_package(CURL REQUIRED)
 
