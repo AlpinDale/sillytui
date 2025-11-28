@@ -43,6 +43,7 @@ typedef struct {
 
 typedef struct {
   bool skip_exit_confirm;
+  int paste_attachment_threshold;
 } AppSettings;
 
 bool config_ensure_dir(void);

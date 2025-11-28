@@ -391,31 +391,103 @@ char *build_system_prompt(const LLMContext *context) {
   return sb.data;
 }
 
-static ChatTokenizer *g_current_tokenizer = NULL;
-
-void set_current_tokenizer(ChatTokenizer *tokenizer) {
-  g_current_tokenizer = tokenizer;
-}
-
-int count_tokens_with_tokenizer(ChatTokenizer *tokenizer,
-                                const ModelConfig *config, const char *text) {
-  if (!text)
+int count_tokens(const ModelConfig *config, const char *text) {
+  if (!config || !text)
     return -1;
-  if (tokenizer && !chat_tokenizer_is_api(tokenizer) && tokenizer->loaded) {
-    int result = chat_tokenizer_count(tokenizer, text);
-    if (result >= 0)
-      return result;
-  }
-  if (!config)
-    return (int)(strlen(text) / 4);
   extern int llm_tokenize(const ModelConfig *config, const char *text);
   int result = llm_tokenize(config, text);
   if (result < 0) {
-    return (int)(strlen(text) / 4);
+    size_t len = strlen(text);
+    return (int)(len / 4);
   }
   return result;
 }
 
-int count_tokens(const ModelConfig *config, const char *text) {
-  return count_tokens_with_tokenizer(g_current_tokenizer, config, text);
+static char *load_attachment_content(const char *ref) {
+  if (!ref || strncmp(ref, "[Attachment: ", 13) != 0)
+    return NULL;
+
+  const char *filename_start = ref + 13;
+  const char *filename_end = strchr(filename_start, ']');
+  if (!filename_end)
+    return NULL;
+
+  size_t filename_len = filename_end - filename_start;
+  if (filename_len == 0 || filename_len >= 256)
+    return NULL;
+
+  const char *home = getenv("HOME");
+  if (!home)
+    return NULL;
+
+  char filename[256];
+  strncpy(filename, filename_start, filename_len);
+  filename[filename_len] = '\0';
+
+  char filepath[768];
+  snprintf(filepath, sizeof(filepath), "%s/.config/sillytui/attachments/%s",
+           home, filename);
+
+  FILE *f = fopen(filepath, "r");
+  if (!f)
+    return NULL;
+
+  fseek(f, 0, SEEK_END);
+  long len = ftell(f);
+  fseek(f, 0, SEEK_SET);
+
+  if (len <= 0) {
+    fclose(f);
+    return NULL;
+  }
+
+  char *content = malloc(len + 1);
+  if (!content) {
+    fclose(f);
+    return NULL;
+  }
+
+  size_t read_len = fread(content, 1, len, f);
+  fclose(f);
+  content[read_len] = '\0';
+
+  return content;
+}
+
+char *expand_attachments(const char *content) {
+  if (!content)
+    return NULL;
+
+  const char *attachment_start = strstr(content, "[Attachment: ");
+  if (!attachment_start)
+    return NULL;
+
+  const char *attachment_end = strchr(attachment_start, ']');
+  if (!attachment_end)
+    return NULL;
+
+  char *attachment_content = load_attachment_content(attachment_start);
+  if (!attachment_content)
+    return NULL;
+
+  size_t before_len = attachment_start - content;
+  size_t after_len = strlen(attachment_end + 1);
+  size_t attachment_content_len = strlen(attachment_content);
+
+  size_t total_len = before_len + attachment_content_len + after_len + 1;
+  char *expanded = malloc(total_len);
+  if (!expanded) {
+    free(attachment_content);
+    return NULL;
+  }
+
+  memcpy(expanded, content, before_len);
+  memcpy(expanded + before_len, attachment_content, attachment_content_len);
+  if (after_len > 0) {
+    memcpy(expanded + before_len + attachment_content_len, attachment_end + 1, after_len);
+  }
+  expanded[total_len - 1] = '\0';
+
+  free(attachment_content);
+  return expanded;
 }

@@ -217,7 +217,10 @@ static char *anthropic_build_request(const ModelConfig *config,
         content++;
     }
 
-    char *substituted = macro_substitute(content, char_name, user_name);
+    char *expanded = expand_attachments(content);
+    char *substituted = macro_substitute(expanded ? expanded : content, char_name, user_name);
+    if (expanded)
+      free(expanded);
     char *escaped = escape_json_string(substituted ? substituted : content);
     free(substituted);
     if (!escaped)

@@ -339,6 +339,7 @@ static const char *get_settings_path(void) {
 
 bool config_load_settings(AppSettings *settings) {
   memset(settings, 0, sizeof(*settings));
+  settings->paste_attachment_threshold = 1000;
 
   const char *path = get_settings_path();
   FILE *f = fopen(path, "r");
@@ -369,6 +370,18 @@ bool config_load_settings(AppSettings *settings) {
     settings->skip_exit_confirm = true;
   }
 
+  const char *threshold_key = "\"paste_attachment_threshold\"";
+  const char *threshold_pos = strstr(buf, threshold_key);
+  if (threshold_pos) {
+    const char *colon = strchr(threshold_pos, ':');
+    if (colon) {
+      int threshold = atoi(colon + 1);
+      if (threshold > 0) {
+        settings->paste_attachment_threshold = threshold;
+      }
+    }
+  }
+
   free(buf);
   return true;
 }
@@ -381,8 +394,10 @@ bool config_save_settings(const AppSettings *settings) {
     return false;
 
   fprintf(f, "{\n");
-  fprintf(f, "  \"skip_exit_confirm\": %s\n",
+  fprintf(f, "  \"skip_exit_confirm\": %s,\n",
           settings->skip_exit_confirm ? "true" : "false");
+  fprintf(f, "  \"paste_attachment_threshold\": %d\n",
+          settings->paste_attachment_threshold);
   fprintf(f, "}\n");
 
   fclose(f);

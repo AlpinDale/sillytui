@@ -31,6 +31,8 @@ int count_tokens_with_tokenizer(ChatTokenizer *tokenizer,
                                 const ModelConfig *config, const char *text);
 void set_current_tokenizer(ChatTokenizer *tokenizer);
 
+char *expand_attachments(const char *content);
+
 void append_to_response(LLMResponse *resp, const char *data, size_t len);
 void append_to_reasoning(LLMResponse *resp, const char *data, size_t len);
 
