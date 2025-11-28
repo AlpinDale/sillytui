@@ -45,12 +45,19 @@ static char *anthropic_build_request(const ModelConfig *config,
   bool note_after =
       note && note->text[0] && note->position == AN_POS_AFTER_SCENARIO;
 
-  if (note_before || system_prompt || note_after) {
+  char *lore_ctx = NULL;
+  if (context && context->lorebook) {
+    lore_ctx = lorebook_build_context(context->lorebook, history, 0);
+  }
+
+  if (note_before || system_prompt || note_after || lore_ctx) {
     size_t sys_len = 0;
     if (note_before)
       sys_len += strlen(note->text) + 2;
     if (system_prompt)
       sys_len += strlen(system_prompt);
+    if (lore_ctx)
+      sys_len += strlen(lore_ctx) + 20;
     if (note_after)
       sys_len += strlen(note->text) + 2;
     char *combined = malloc(sys_len + 1);
@@ -58,13 +65,19 @@ static char *anthropic_build_request(const ModelConfig *config,
       combined[0] = '\0';
       if (note_before) {
         strcat(combined, note->text);
-        if (system_prompt)
+        if (system_prompt || lore_ctx)
           strcat(combined, "\n\n");
       }
       if (system_prompt)
         strcat(combined, system_prompt);
-      if (note_after) {
+      if (lore_ctx) {
         if (system_prompt || note_before)
+          strcat(combined, "\n\n");
+        strcat(combined, "[World Info]\n");
+        strcat(combined, lore_ctx);
+      }
+      if (note_after) {
+        if (system_prompt || note_before || lore_ctx)
           strcat(combined, "\n\n");
         strcat(combined, note->text);
       }
@@ -83,6 +96,7 @@ static char *anthropic_build_request(const ModelConfig *config,
       free(combined);
     }
   }
+  free(lore_ctx);
   if (system_prompt)
     free(system_prompt);
 
@@ -295,6 +309,11 @@ static void anthropic_parse_stream(StreamCtx *ctx, const char *line) {
     if (delta) {
       char *content = find_json_string(delta, "text");
       if (content && content[0]) {
+        if (!ctx->has_first_token) {
+          gettimeofday(&ctx->first_token_time, NULL);
+          ctx->has_first_token = true;
+        }
+        gettimeofday(&ctx->last_token_time, NULL);
         ctx->got_content = true;
         append_to_response(ctx->resp, content, strlen(content));
         if (ctx->cb) {

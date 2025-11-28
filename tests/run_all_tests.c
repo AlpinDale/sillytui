@@ -16,6 +16,7 @@ extern void run_tokenizer_tests(void);
 extern void run_modal_tests(void);
 extern void run_struct_size_tests(void);
 extern void run_robustness_tests(void);
+extern void run_lorebook_tests(void);
 
 extern void run_boundary_tests(void);
 extern void run_stress_tests(void);
@@ -66,6 +67,7 @@ int main(int argc, char **argv) {
   run_simd_tests();
   run_tokenizer_tests();
   run_modal_tests();
+  run_lorebook_tests();
 
   printf("\n\033[1;33m>>> Generated Tests <<<\033[0m\n");
   run_unicode_generated_tests();

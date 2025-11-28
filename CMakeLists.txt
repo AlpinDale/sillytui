@@ -33,6 +33,7 @@ set(SOURCES
     src/llm/backends/kobold.c
     src/character/character.c
     src/character/persona.c
+    src/lore/lorebook.c
     src/tokenizer/tiktoken.c
     src/tokenizer/sentencepiece.c
     src/tokenizer/gpt2bpe.c
@@ -88,7 +89,7 @@ endif()
 add_executable(run_tests ${TEST_SOURCES})
 target_compile_definitions(run_tests PRIVATE _XOPEN_SOURCE_EXTENDED NCURSES_WIDECHAR=1)
 target_include_directories(run_tests PRIVATE ${CURSES_INCLUDE_DIR} src tests)
-target_link_libraries(run_tests PRIVATE ${CURSES_LIBRARIES} m)
+target_link_libraries(run_tests PRIVATE ${CURSES_LIBRARIES} ${CURL_LIBRARIES} m)
 
 enable_testing()
 add_test(NAME unit_tests COMMAND run_tests)
@@ -126,7 +127,7 @@ endif()
 add_executable(run_integration_tests ${INTEGRATION_TEST_SOURCES})
 target_compile_definitions(run_integration_tests PRIVATE _XOPEN_SOURCE_EXTENDED NCURSES_WIDECHAR=1)
 target_include_directories(run_integration_tests PRIVATE ${CURSES_INCLUDE_DIR} src tests tests/integration)
-target_link_libraries(run_integration_tests PRIVATE ${CURSES_LIBRARIES} m)
+target_link_libraries(run_integration_tests PRIVATE ${CURSES_LIBRARIES} ${CURL_LIBRARIES} m)
 
 add_test(NAME integration_tests COMMAND run_integration_tests)
 
@@ -141,6 +142,7 @@ set(ALL_TEST_SOURCES
     tests/test_modal.c
     tests/test_struct_sizes.c
     tests/test_robustness.c
+    tests/test_lorebook.c
     tests/boundary/test_boundary.c
     tests/stress/test_stress.c
     tests/generated/test_unicode_gen.c
@@ -165,6 +167,7 @@ set(ALL_TEST_SOURCES
     src/llm/sampler.c
     src/character/character.c
     src/character/persona.c
+    src/lore/lorebook.c
     src/tokenizer/tiktoken.c
     src/tokenizer/gpt2bpe.c
     src/tokenizer/sentencepiece.c
@@ -184,7 +187,7 @@ endif()
 add_executable(run_all_tests ${ALL_TEST_SOURCES})
 target_compile_definitions(run_all_tests PRIVATE _XOPEN_SOURCE_EXTENDED NCURSES_WIDECHAR=1)
 target_include_directories(run_all_tests PRIVATE ${CURSES_INCLUDE_DIR} src tests tests/boundary tests/stress tests/generated tests/property)
-target_link_libraries(run_all_tests PRIVATE ${CURSES_LIBRARIES} m)
+target_link_libraries(run_all_tests PRIVATE ${CURSES_LIBRARIES} ${CURL_LIBRARIES} m)
 
 add_test(NAME all_tests COMMAND run_all_tests)
 

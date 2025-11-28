@@ -81,6 +81,30 @@ static char *kobold_build_request(const ModelConfig *config,
     free(system_prompt);
   }
 
+  if (context && context->lorebook) {
+    char *lore_ctx = lorebook_build_context(context->lorebook, history, 0);
+    if (lore_ctx && lore_ctx[0]) {
+      char *escaped = escape_json_string(lore_ctx);
+      if (escaped) {
+        size_t needed = strlen(escaped) + 128;
+        if (pos + needed >= cap) {
+          cap = (pos + needed) * 2;
+          char *tmp = realloc(body, cap);
+          if (tmp)
+            body = tmp;
+        }
+        if (!first)
+          body[pos++] = ',';
+        pos += snprintf(
+            body + pos, cap - pos,
+            "{\"role\":\"system\",\"content\":\"[World Info]\\n%s\"}", escaped);
+        first = false;
+        free(escaped);
+      }
+      free(lore_ctx);
+    }
+  }
+
   bool note_after =
       note && note->text[0] && note->position == AN_POS_AFTER_SCENARIO;
   if (note_after) {
@@ -363,6 +387,11 @@ static void kobold_parse_stream(StreamCtx *ctx, const char *line) {
 
   char *content = find_json_string(delta, "content");
   if (content && content[0]) {
+    if (!ctx->has_first_token) {
+      gettimeofday(&ctx->first_token_time, NULL);
+      ctx->has_first_token = true;
+    }
+    gettimeofday(&ctx->last_token_time, NULL);
     ctx->got_content = true;
     append_to_response(ctx->resp, content, strlen(content));
     if (ctx->cb) {

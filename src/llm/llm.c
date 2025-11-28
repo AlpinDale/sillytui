@@ -224,6 +224,7 @@ void process_sse_line(StreamCtx *ctx, const char *line, bool is_anthropic) {
 
 LLMResponse llm_chat(const ModelConfig *config, const ChatHistory *history,
                      const LLMContext *context, LLMStreamCallback stream_cb,
+                     LLMReasoningCallback reasoning_cb,
                      LLMProgressCallback progress_cb, void *userdata) {
   LLMResponse resp = {0};
 
@@ -279,13 +280,16 @@ LLMResponse llm_chat(const ModelConfig *config, const ChatHistory *history,
 
   StreamCtx ctx = {.resp = &resp,
                    .cb = stream_cb,
+                   .reasoning_cb = reasoning_cb,
                    .progress_cb = progress_cb,
                    .userdata = userdata,
                    .line_len = 0,
                    .got_content = false,
+                   .in_reasoning = false,
                    .prompt_tokens = 0,
                    .completion_tokens = 0,
-                   .is_anthropic = (config->api_type == API_TYPE_ANTHROPIC)};
+                   .is_anthropic = (config->api_type == API_TYPE_ANTHROPIC),
+                   .has_first_token = false};
 
   curl_easy_setopt(curl, CURLOPT_URL, url);
   curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
@@ -337,6 +341,15 @@ LLMResponse llm_chat(const ModelConfig *config, const ChatHistory *history,
   resp.completion_tokens = ctx.completion_tokens;
   resp.elapsed_ms = elapsed_ms;
 
+  if (ctx.has_first_token && ctx.completion_tokens > 0) {
+    double output_time_ms =
+        (ctx.last_token_time.tv_sec - ctx.first_token_time.tv_sec) * 1000.0 +
+        (ctx.last_token_time.tv_usec - ctx.first_token_time.tv_usec) / 1000.0;
+    if (output_time_ms > 0) {
+      resp.output_tps = (ctx.completion_tokens * 1000.0) / output_time_ms;
+    }
+  }
+
   curl_slist_free_all(headers);
   curl_easy_cleanup(curl);
   free(body);
@@ -349,4 +362,8 @@ void llm_response_free(LLMResponse *resp) {
   resp->content = NULL;
   resp->len = 0;
   resp->cap = 0;
+  free(resp->reasoning);
+  resp->reasoning = NULL;
+  resp->reasoning_len = 0;
+  resp->reasoning_cap = 0;
 }

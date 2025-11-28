@@ -1,0 +1,63 @@
+{
+  "name": "Fantasy Lore",
+  "description": "Lore about the fantasy world",
+  "scan_depth": 50,
+  "recursive_scanning": false,
+  "entries": {
+    "1": {
+      "uid": 1,
+      "key": ["dragon", "wyrm", "drake"],
+      "keysecondary": ["fire", "ancient"],
+      "comment": "Dragons",
+      "content": "Dragons are ancient beings of immense power. They can breathe fire and live for thousands of years.",
+      "constant": false,
+      "selective": false,
+      "order": 100,
+      "position": 1,
+      "depth": 4,
+      "role": 0,
+      "disable": false,
+      "caseSensitive": false,
+      "matchWholeWords": true,
+      "scanDepth": 50,
+      "probability": 100
+    },
+    "2": {
+      "uid": 2,
+      "key": ["wizard", "mage", "sorcerer"],
+      "keysecondary": [],
+      "comment": "Wizards",
+      "content": "Wizards are masters of arcane magic. They study for decades to learn their craft.",
+      "constant": false,
+      "selective": false,
+      "order": 90,
+      "position": 1,
+      "depth": 4,
+      "role": 0,
+      "disable": false,
+      "caseSensitive": false,
+      "matchWholeWords": false,
+      "scanDepth": 50,
+      "probability": 100
+    },
+    "3": {
+      "uid": 3,
+      "key": ["tavern"],
+      "keysecondary": ["ale", "beer"],
+      "comment": "Tavern Lore",
+      "content": "The Golden Dragon Tavern is a famous establishment known for its fine ales and mysterious patrons.",
+      "constant": false,
+      "selective": true,
+      "order": 50,
+      "position": 4,
+      "depth": 2,
+      "role": 0,
+      "disable": false,
+      "caseSensitive": false,
+      "matchWholeWords": true,
+      "scanDepth": 20,
+      "probability": 80
+    }
+  }
+}
+

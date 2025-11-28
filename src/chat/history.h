@@ -10,6 +10,8 @@ typedef enum { ROLE_USER = 0, ROLE_ASSISTANT = 1, ROLE_SYSTEM = 2 } MessageRole;
 
 typedef struct {
   char **swipes;
+  char **reasoning;
+  double *reasoning_times;
   size_t swipe_count;
   size_t active_swipe;
   int *token_counts;
@@ -54,6 +56,14 @@ void history_set_output_tps(ChatHistory *history, size_t msg_index,
                             size_t swipe_index, double tps);
 double history_get_output_tps(const ChatHistory *history, size_t msg_index,
                               size_t swipe_index);
+
+void history_set_reasoning(ChatHistory *history, size_t msg_index,
+                           size_t swipe_index, const char *reasoning,
+                           double reasoning_ms);
+const char *history_get_reasoning(const ChatHistory *history, size_t msg_index,
+                                  size_t swipe_index);
+double history_get_reasoning_time(const ChatHistory *history, size_t msg_index,
+                                  size_t swipe_index);
 
 size_t history_add_with_role(ChatHistory *history, const char *message,
                              MessageRole role);

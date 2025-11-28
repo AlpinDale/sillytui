@@ -9,6 +9,25 @@
 
 static bool g_ui_colors = false;
 
+#define MAX_EXPANDED_REASONING 256
+static bool g_reasoning_expanded[MAX_EXPANDED_REASONING] = {false};
+
+bool ui_is_reasoning_expanded(size_t msg_index) {
+  if (msg_index >= MAX_EXPANDED_REASONING)
+    return false;
+  return g_reasoning_expanded[msg_index];
+}
+
+void ui_toggle_reasoning(size_t msg_index) {
+  if (msg_index >= MAX_EXPANDED_REASONING)
+    return;
+  g_reasoning_expanded[msg_index] = !g_reasoning_expanded[msg_index];
+}
+
+void ui_reset_reasoning_state(void) {
+  memset(g_reasoning_expanded, 0, sizeof(g_reasoning_expanded));
+}
+
 #define COLOR_PAIR_BORDER_DIM 22
 #define COLOR_PAIR_ACCENT 23
 #define COLOR_PAIR_STATUS 24
@@ -246,6 +265,8 @@ typedef struct {
   bool is_first_line;
   bool is_spacer;
   bool is_name_line;
+  bool is_reasoning_indicator;
+  double reasoning_time_ms;
   unsigned initial_style;
 } DisplayLine;
 
@@ -313,8 +334,55 @@ static int build_display_lines(const ChatHistory *history, int content_width,
       lines[total].is_first_line = true;
       lines[total].is_spacer = false;
       lines[total].is_name_line = true;
+      lines[total].is_reasoning_indicator = false;
+      lines[total].reasoning_time_ms = 0;
       lines[total].initial_style = 0;
       total++;
+    }
+
+    size_t active_swipe = history_get_active_swipe(history, i);
+    const char *reasoning = history_get_reasoning(history, i, active_swipe);
+    if (reasoning && reasoning[0] && total < max_lines) {
+      double reasoning_time =
+          history_get_reasoning_time(history, i, active_swipe);
+      bool expanded = ui_is_reasoning_expanded(i);
+
+      lines[total].msg_index = (int)i;
+      lines[total].line_in_msg = -2;
+      lines[total].line_start = reasoning;
+      lines[total].line_len = (int)strlen(reasoning);
+      lines[total].is_user = false;
+      lines[total].is_bot = is_bot;
+      lines[total].is_system = false;
+      lines[total].is_first_line = false;
+      lines[total].is_spacer = false;
+      lines[total].is_name_line = false;
+      lines[total].is_reasoning_indicator = true;
+      lines[total].reasoning_time_ms = reasoning_time;
+      lines[total].initial_style = 0;
+      total++;
+
+      if (expanded) {
+        int num_reasoning_wrapped =
+            wrap_text(reasoning, text_width - 2, wrapped, 200);
+        for (int rline = 0; rline < num_reasoning_wrapped && total < max_lines;
+             rline++) {
+          lines[total].msg_index = (int)i;
+          lines[total].line_in_msg = -3 - rline;
+          lines[total].line_start = wrapped[rline].start;
+          lines[total].line_len = wrapped[rline].len;
+          lines[total].is_user = false;
+          lines[total].is_bot = is_bot;
+          lines[total].is_system = false;
+          lines[total].is_first_line = false;
+          lines[total].is_spacer = false;
+          lines[total].is_name_line = false;
+          lines[total].is_reasoning_indicator = false;
+          lines[total].reasoning_time_ms = -1;
+          lines[total].initial_style = 0;
+          total++;
+        }
+      }
     }
 
     int num_wrapped = wrap_text(content, text_width, wrapped, 200);
@@ -331,6 +399,8 @@ static int build_display_lines(const ChatHistory *history, int content_width,
       lines[total].is_first_line = false;
       lines[total].is_spacer = false;
       lines[total].is_name_line = false;
+      lines[total].is_reasoning_indicator = false;
+      lines[total].reasoning_time_ms = 0;
       lines[total].initial_style = running_style;
 
       running_style = markdown_compute_style_after(
@@ -350,6 +420,8 @@ static int build_display_lines(const ChatHistory *history, int content_width,
       lines[total].is_first_line = false;
       lines[total].is_spacer = true;
       lines[total].is_name_line = false;
+      lines[total].is_reasoning_indicator = false;
+      lines[total].reasoning_time_ms = 0;
       lines[total].initial_style = 0;
       total++;
     }
@@ -659,6 +731,48 @@ void ui_draw_chat_ex(WINDOW *chat_win, const ChatHistory *history,
             wattroff(chat_win, COLOR_PAIR(hint_pair) | A_DIM);
         }
       }
+      continue;
+    }
+
+    if (dl->is_reasoning_indicator) {
+      bool expanded = ui_is_reasoning_expanded(dl->msg_index);
+      int pair = is_selected ? COLOR_PAIR_BOT_SEL : COLOR_PAIR_BOT;
+      if (g_ui_colors)
+        wattron(chat_win, COLOR_PAIR(pair) | A_DIM);
+      mvwaddstr(chat_win, y, x, "│");
+      if (g_ui_colors)
+        wattroff(chat_win, COLOR_PAIR(pair) | A_DIM);
+
+      char reasoning_str[128];
+      double secs = dl->reasoning_time_ms / 1000.0;
+      const char *arrow = expanded ? "▼" : "▶";
+      snprintf(reasoning_str, sizeof(reasoning_str), " %s 💭 Thought for %.1fs",
+               arrow, secs);
+
+      int hint_pair = is_selected ? COLOR_PAIR_HINT_SEL : COLOR_PAIR_HINT;
+      if (g_ui_colors)
+        wattron(chat_win, COLOR_PAIR(hint_pair) | A_DIM);
+      mvwaddstr(chat_win, y, x + gutter_width, reasoning_str);
+      if (is_selected && g_ui_colors) {
+        wattron(chat_win, COLOR_PAIR(hint_pair));
+        mvwaddstr(chat_win, y, x + gutter_width + (int)strlen(reasoning_str),
+                  " [t]");
+        wattroff(chat_win, COLOR_PAIR(hint_pair));
+      }
+      if (g_ui_colors)
+        wattroff(chat_win, COLOR_PAIR(hint_pair) | A_DIM);
+      continue;
+    }
+
+    if (dl->reasoning_time_ms < 0) {
+      int pair = is_selected ? COLOR_PAIR_HINT_SEL : COLOR_PAIR_HINT;
+      if (g_ui_colors)
+        wattron(chat_win, COLOR_PAIR(pair) | A_DIM);
+      mvwaddstr(chat_win, y, x, "┊");
+      mvwaddstr(chat_win, y, x + 1, "  ");
+      mvwaddnstr(chat_win, y, x + gutter_width, dl->line_start, dl->line_len);
+      if (g_ui_colors)
+        wattroff(chat_win, COLOR_PAIR(pair) | A_DIM);
       continue;
     }
 

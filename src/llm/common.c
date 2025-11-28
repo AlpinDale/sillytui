@@ -147,6 +147,22 @@ void append_to_response(LLMResponse *resp, const char *data, size_t len) {
   resp->content[resp->len] = '\0';
 }
 
+void append_to_reasoning(LLMResponse *resp, const char *data, size_t len) {
+  if (resp->reasoning_len + len + 1 > resp->reasoning_cap) {
+    size_t newcap = resp->reasoning_cap == 0 ? 1024 : resp->reasoning_cap * 2;
+    while (newcap < resp->reasoning_len + len + 1)
+      newcap *= 2;
+    char *tmp = realloc(resp->reasoning, newcap);
+    if (!tmp)
+      return;
+    resp->reasoning = tmp;
+    resp->reasoning_cap = newcap;
+  }
+  memcpy(resp->reasoning + resp->reasoning_len, data, len);
+  resp->reasoning_len += len;
+  resp->reasoning[resp->reasoning_len] = '\0';
+}
+
 size_t stream_callback(char *ptr, size_t size, size_t nmemb, void *userdata) {
   StreamCtx *ctx = userdata;
   size_t bytes = size * nmemb;

@@ -29,6 +29,7 @@ void free_example_messages(ExampleMessage *messages, size_t count);
 int count_tokens(const ModelConfig *config, const char *text);
 
 void append_to_response(LLMResponse *resp, const char *data, size_t len);
+void append_to_reasoning(LLMResponse *resp, const char *data, size_t len);
 
 size_t stream_callback(char *ptr, size_t size, size_t nmemb, void *userdata);
 int progress_callback(void *clientp, curl_off_t dltotal, curl_off_t dlnow,

@@ -17,6 +17,8 @@ static char *dup_string(const char *source) {
 
 static void message_init(ChatMessage *msg) {
   msg->swipes = NULL;
+  msg->reasoning = NULL;
+  msg->reasoning_times = NULL;
   msg->swipe_count = 0;
   msg->active_swipe = 0;
   msg->token_counts = NULL;
@@ -30,12 +32,18 @@ static void message_free(ChatMessage *msg) {
     return;
   for (size_t i = 0; i < msg->swipe_count; i++) {
     free(msg->swipes[i]);
+    if (msg->reasoning)
+      free(msg->reasoning[i]);
   }
   free(msg->swipes);
+  free(msg->reasoning);
+  free(msg->reasoning_times);
   free(msg->token_counts);
   free(msg->gen_times);
   free(msg->output_tps);
   msg->swipes = NULL;
+  msg->reasoning = NULL;
+  msg->reasoning_times = NULL;
   msg->token_counts = NULL;
   msg->gen_times = NULL;
   msg->output_tps = NULL;
@@ -379,4 +387,49 @@ bool history_move_down(ChatHistory *history, size_t index) {
   history->messages[index] = history->messages[index + 1];
   history->messages[index + 1] = temp;
   return true;
+}
+
+void history_set_reasoning(ChatHistory *history, size_t msg_index,
+                           size_t swipe_index, const char *reasoning,
+                           double reasoning_ms) {
+  if (!history || msg_index >= history->count)
+    return;
+  ChatMessage *msg = &history->messages[msg_index];
+  if (swipe_index >= msg->swipe_count)
+    return;
+
+  if (!msg->reasoning) {
+    msg->reasoning = calloc(msg->swipe_count, sizeof(char *));
+    if (!msg->reasoning)
+      return;
+  }
+  if (!msg->reasoning_times) {
+    msg->reasoning_times = calloc(msg->swipe_count, sizeof(double));
+    if (!msg->reasoning_times)
+      return;
+  }
+
+  free(msg->reasoning[swipe_index]);
+  msg->reasoning[swipe_index] = reasoning ? strdup(reasoning) : NULL;
+  msg->reasoning_times[swipe_index] = reasoning_ms;
+}
+
+const char *history_get_reasoning(const ChatHistory *history, size_t msg_index,
+                                  size_t swipe_index) {
+  if (!history || msg_index >= history->count)
+    return NULL;
+  const ChatMessage *msg = &history->messages[msg_index];
+  if (swipe_index >= msg->swipe_count || !msg->reasoning)
+    return NULL;
+  return msg->reasoning[swipe_index];
+}
+
+double history_get_reasoning_time(const ChatHistory *history, size_t msg_index,
+                                  size_t swipe_index) {
+  if (!history || msg_index >= history->count)
+    return 0;
+  const ChatMessage *msg = &history->messages[msg_index];
+  if (swipe_index >= msg->swipe_count || !msg->reasoning_times)
+    return 0;
+  return msg->reasoning_times[swipe_index];
 }

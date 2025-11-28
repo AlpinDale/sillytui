@@ -42,6 +42,10 @@ typedef struct {
   int field_len[6];
   ApiType api_type_selection;
 
+  char **fetched_models;
+  size_t fetched_models_count;
+  int fetched_model_index;
+
   int list_selection;
   int list_scroll;
 
