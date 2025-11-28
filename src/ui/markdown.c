@@ -356,6 +356,8 @@ unsigned markdown_render_line_bg(WINDOW *win, int row, int start_col, int width,
   if (!text || text[0] == '\0')
     return initial_style;
 
+  wattrset(win, A_NORMAL);
+
   RenderCtx ctx = {.win = win,
                    .row = row,
                    .start_col = start_col,
