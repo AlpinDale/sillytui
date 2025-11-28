@@ -46,7 +46,15 @@ static bool ensure_attachments_dir(void) {
   return true;
 }
 
-static char *read_all_paste_input(WINDOW *win, int first_ch, size_t *out_len) {
+static long long get_time_ms(void);
+
+static char *read_all_paste_input(WINDOW *win, int first_ch, size_t *out_len,
+                                   WINDOW *input_win, const char *current_buffer,
+                                   int cursor_pos, int input_scroll_line) {
+  (void)current_buffer;
+  (void)cursor_pos;
+  (void)input_scroll_line;
+  
   size_t cap = 4096;
   size_t len = 0;
   char *buf = malloc(cap);
@@ -70,6 +78,11 @@ static char *read_all_paste_input(WINDOW *win, int first_ch, size_t *out_len) {
 
   int ch = wgetch(win);
   int consecutive_empty = 0;
+  int update_counter = 0;
+  long long last_update = get_time_ms();
+  static const char *paste_frames[] = {"Pasting", "Pasting.", "Pasting..", "Pasting..."};
+  int frame_idx = 0;
+  
   while (consecutive_empty < 5) {
     if (ch != ERR) {
       consecutive_empty = 0;
@@ -86,6 +99,21 @@ static char *read_all_paste_input(WINDOW *win, int first_ch, size_t *out_len) {
         buf[len++] = (char)ch;
       }
       ch = wgetch(win);
+      
+      update_counter++;
+      long long now = get_time_ms();
+      if (input_win && (update_counter % 50 == 0 || now - last_update > 150)) {
+        last_update = now;
+        frame_idx = (frame_idx + 1) % 4;
+        
+        if (has_colors())
+          wattron(input_win, COLOR_PAIR(COLOR_PAIR_LOADING) | A_BOLD);
+        mvwaddstr(input_win, 0, 2, paste_frames[frame_idx]);
+        if (has_colors())
+          wattroff(input_win, COLOR_PAIR(COLOR_PAIR_LOADING) | A_BOLD);
+        
+        wrefresh(input_win);
+      }
     } else {
       consecutive_empty++;
       if (consecutive_empty < 5) {
@@ -1816,7 +1844,9 @@ int main(void) {
         if (has_more_input) {
           if (settings.paste_attachment_threshold > 0) {
             size_t paste_len = 0;
-            char *paste_buf = read_all_paste_input(input_win, '\n', &paste_len);
+            char *paste_buf = read_all_paste_input(input_win, '\n', &paste_len,
+                                                   input_win, input_buffer,
+                                                   cursor_pos, input_scroll_line);
             
             if (paste_buf) {
               if (paste_len >= (size_t)settings.paste_attachment_threshold &&
@@ -2182,7 +2212,9 @@ int main(void) {
       if (has_more) {
         if (settings.paste_attachment_threshold > 0) {
           size_t paste_len = 0;
-          char *paste_buf = read_all_paste_input(input_win, ch, &paste_len);
+          char *paste_buf = read_all_paste_input(input_win, ch, &paste_len,
+                                                 input_win, input_buffer,
+                                                 cursor_pos, input_scroll_line);
           
           if (paste_buf) {
             if (paste_len >= (size_t)settings.paste_attachment_threshold &&
