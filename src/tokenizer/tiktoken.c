@@ -545,38 +545,6 @@ static uint64_t hash_bytes(const uint8_t *bytes, size_t len) {
   return simd_hash_bytes(bytes, len);
 }
 
-static inline bool bytes_equal(const uint8_t *a, const uint8_t *b, size_t len) {
-  switch (len) {
-  case 2:
-    return *(const uint16_t *)a == *(const uint16_t *)b;
-  case 3:
-    return (*(const uint16_t *)a == *(const uint16_t *)b) && (a[2] == b[2]);
-  case 4:
-    return *(const uint32_t *)a == *(const uint32_t *)b;
-  case 5:
-    return (*(const uint32_t *)a == *(const uint32_t *)b) && (a[4] == b[4]);
-  case 6:
-    return (*(const uint32_t *)a == *(const uint32_t *)b) &&
-           (*(const uint16_t *)(a + 4) == *(const uint16_t *)(b + 4));
-  case 7:
-    return (*(const uint32_t *)a == *(const uint32_t *)b) &&
-           (*(const uint16_t *)(a + 4) == *(const uint16_t *)(b + 4)) &&
-           (a[6] == b[6]);
-  case 8:
-    return *(const uint64_t *)a == *(const uint64_t *)b;
-  default:
-    if (len < 8) {
-      for (size_t i = 0; i < len; i++)
-        if (a[i] != b[i])
-          return false;
-      return true;
-    }
-    if (*(const uint64_t *)a != *(const uint64_t *)b)
-      return false;
-    return memcmp(a + 8, b + 8, len - 8) == 0;
-  }
-}
-
 uint32_t lookup_rank(const Tokenizer *t, const uint8_t *bytes, size_t len) {
   if (len == 1) {
     return t->byte_to_rank[bytes[0]];
@@ -593,7 +561,7 @@ uint32_t lookup_rank(const Tokenizer *t, const uint8_t *bytes, size_t len) {
     HashEntry *e = &t->hash_table[idx];
     if (!e->occupied)
       return UINT32_MAX;
-    if (e->len == len && bytes_equal(e->bytes, bytes, len))
+    if (e->len == len && memcmp(e->bytes, bytes, len) == 0)
       return e->rank;
     idx = (idx + 1) & (t->hash_size - 1);
   } while (idx != start_idx);

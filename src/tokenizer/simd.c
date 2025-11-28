@@ -256,117 +256,93 @@ bool simd_available(void) {
 }
 
 uint64_t simd_hash_bytes(const uint8_t *bytes, size_t len) {
+  if (g_simd_available || !g_simd_initialized) {
+    if (!g_simd_initialized)
+      simd_init();
+    if (g_simd_available) {
 #if SIMD_ARM64
-  if (g_simd_available || !g_simd_initialized) {
-    if (!g_simd_initialized)
-      simd_init();
-    if (g_simd_available)
       return simd_hash_bytes_arm64(bytes, len);
-  }
 #elif SIMD_X86_64
-  if (g_simd_available || !g_simd_initialized) {
-    if (!g_simd_initialized)
-      simd_init();
-    if (g_simd_available)
       return simd_hash_bytes_x86_64(bytes, len);
-  }
 #endif
+    }
+  }
   return hash_bytes_fallback(bytes, len);
 }
 
 size_t simd_find_non_ascii(const uint8_t *data, size_t len) {
+  if (g_simd_available || !g_simd_initialized) {
+    if (!g_simd_initialized)
+      simd_init();
+    if (g_simd_available) {
 #if SIMD_ARM64
-  if (g_simd_available || !g_simd_initialized) {
-    if (!g_simd_initialized)
-      simd_init();
-    if (g_simd_available)
       return simd_find_non_ascii_arm64(data, len);
-  }
 #elif SIMD_X86_64
-  if (g_simd_available || !g_simd_initialized) {
-    if (!g_simd_initialized)
-      simd_init();
-    if (g_simd_available)
       return simd_find_non_ascii_x86_64(data, len);
-  }
 #endif
+    }
+  }
   return find_non_ascii_fallback(data, len);
 }
 
 bool simd_is_all_ascii(const uint8_t *data, size_t len) {
+  if (g_simd_available || !g_simd_initialized) {
+    if (!g_simd_initialized)
+      simd_init();
+    if (g_simd_available) {
 #if SIMD_ARM64
-  if (g_simd_available || !g_simd_initialized) {
-    if (!g_simd_initialized)
-      simd_init();
-    if (g_simd_available)
       return simd_is_all_ascii_arm64(data, len);
-  }
 #elif SIMD_X86_64
-  if (g_simd_available || !g_simd_initialized) {
-    if (!g_simd_initialized)
-      simd_init();
-    if (g_simd_available)
       return simd_is_all_ascii_x86_64(data, len);
-  }
 #endif
+    }
+  }
   return is_all_ascii_fallback(data, len);
 }
 
 size_t simd_count_utf8_chars(const uint8_t *data, size_t len) {
+  if (g_simd_available || !g_simd_initialized) {
+    if (!g_simd_initialized)
+      simd_init();
+    if (g_simd_available) {
 #if SIMD_ARM64
-  if (g_simd_available || !g_simd_initialized) {
-    if (!g_simd_initialized)
-      simd_init();
-    if (g_simd_available)
       return simd_count_utf8_chars_arm64(data, len);
-  }
 #elif SIMD_X86_64
-  if (g_simd_available || !g_simd_initialized) {
-    if (!g_simd_initialized)
-      simd_init();
-    if (g_simd_available)
       return simd_count_utf8_chars_x86_64(data, len);
-  }
 #endif
+    }
+  }
   return count_utf8_chars_fallback(data, len);
 }
 
 size_t simd_argmin_u32(const uint32_t *values, size_t count,
                        uint32_t *out_min) {
+  if (g_simd_available || !g_simd_initialized) {
+    if (!g_simd_initialized)
+      simd_init();
+    if (g_simd_available) {
 #if SIMD_ARM64
-  if (g_simd_available || !g_simd_initialized) {
-    if (!g_simd_initialized)
-      simd_init();
-    if (g_simd_available)
       return simd_argmin_u32_arm64(values, count, out_min);
-  }
 #elif SIMD_X86_64
-  if (g_simd_available || !g_simd_initialized) {
-    if (!g_simd_initialized)
-      simd_init();
-    if (g_simd_available)
       return simd_argmin_u32_x86_64(values, count, out_min);
-  }
 #endif
+    }
+  }
   return argmin_u32_fallback(values, count, out_min);
 }
 
 size_t simd_match_ascii_letters(const uint8_t *data, size_t len) {
+  if (g_simd_available || !g_simd_initialized) {
+    if (!g_simd_initialized)
+      simd_init();
+    if (g_simd_available) {
 #if SIMD_ARM64
-  if (g_simd_available || !g_simd_initialized) {
-    if (!g_simd_initialized)
-      simd_init();
-    if (g_simd_available)
       return simd_match_ascii_letters_arm64(data, len);
-  }
 #elif SIMD_X86_64
-  if (g_simd_available || !g_simd_initialized) {
-    if (!g_simd_initialized)
-      simd_init();
-    if (g_simd_available)
       return simd_match_ascii_letters_x86_64(data, len);
-  }
 #endif
+    }
+  }
   return match_ascii_letters_fallback(data, len);
 }
 
