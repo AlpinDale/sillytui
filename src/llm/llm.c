@@ -223,6 +223,7 @@ void process_sse_line(StreamCtx *ctx, const char *line, bool is_anthropic) {
 
 LLMResponse llm_chat(const ModelConfig *config, const ChatHistory *history,
                      const LLMContext *context, LLMStreamCallback stream_cb,
+                     LLMReasoningCallback reasoning_cb,
                      LLMProgressCallback progress_cb, void *userdata) {
   LLMResponse resp = {0};
 
@@ -278,10 +279,12 @@ LLMResponse llm_chat(const ModelConfig *config, const ChatHistory *history,
 
   StreamCtx ctx = {.resp = &resp,
                    .cb = stream_cb,
+                   .reasoning_cb = reasoning_cb,
                    .progress_cb = progress_cb,
                    .userdata = userdata,
                    .line_len = 0,
                    .got_content = false,
+                   .in_reasoning = false,
                    .prompt_tokens = 0,
                    .completion_tokens = 0,
                    .is_anthropic = (config->api_type == API_TYPE_ANTHROPIC),
@@ -358,4 +361,8 @@ void llm_response_free(LLMResponse *resp) {
   resp->content = NULL;
   resp->len = 0;
   resp->cap = 0;
+  free(resp->reasoning);
+  resp->reasoning = NULL;
+  resp->reasoning_len = 0;
+  resp->reasoning_cap = 0;
 }

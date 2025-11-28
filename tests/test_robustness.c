@@ -5,6 +5,7 @@
 #include "llm/sampler.h"
 #include "test_framework.h"
 #include "tokenizer/tiktoken.h"
+#include "ui/ui.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -644,6 +645,144 @@ TEST(author_note_role_values) {
   PASS();
 }
 
+TEST(reasoning_set_get_basic) {
+  ChatHistory h;
+  history_init(&h);
+  size_t idx = history_add(&h, "Hello");
+  history_set_reasoning(&h, idx, 0, "This is my reasoning", 1500.0);
+  const char *reasoning = history_get_reasoning(&h, idx, 0);
+  ASSERT_NOT_NULL(reasoning);
+  ASSERT_EQ_STR("This is my reasoning", reasoning);
+  double time = history_get_reasoning_time(&h, idx, 0);
+  ASSERT(time > 1499.0 && time < 1501.0);
+  history_free(&h);
+  PASS();
+}
+
+TEST(reasoning_null_on_missing) {
+  ChatHistory h;
+  history_init(&h);
+  size_t idx = history_add(&h, "Hello");
+  const char *reasoning = history_get_reasoning(&h, idx, 0);
+  ASSERT(reasoning == NULL);
+  double time = history_get_reasoning_time(&h, idx, 0);
+  ASSERT(time == 0);
+  history_free(&h);
+  PASS();
+}
+
+TEST(reasoning_multiple_swipes) {
+  ChatHistory h;
+  history_init(&h);
+  size_t idx = history_add(&h, "First response");
+  history_add_swipe(&h, idx, "Second response");
+  history_add_swipe(&h, idx, "Third response");
+  history_set_reasoning(&h, idx, 0, "Reasoning for first", 100.0);
+  history_set_reasoning(&h, idx, 1, "Reasoning for second", 200.0);
+  history_set_reasoning(&h, idx, 2, "Reasoning for third", 300.0);
+  ASSERT_EQ_STR("Reasoning for first", history_get_reasoning(&h, idx, 0));
+  ASSERT_EQ_STR("Reasoning for second", history_get_reasoning(&h, idx, 1));
+  ASSERT_EQ_STR("Reasoning for third", history_get_reasoning(&h, idx, 2));
+  ASSERT(history_get_reasoning_time(&h, idx, 0) > 99.0);
+  ASSERT(history_get_reasoning_time(&h, idx, 1) > 199.0);
+  ASSERT(history_get_reasoning_time(&h, idx, 2) > 299.0);
+  history_free(&h);
+  PASS();
+}
+
+TEST(reasoning_null_safety) {
+  history_set_reasoning(NULL, 0, 0, "test", 100.0);
+  const char *r = history_get_reasoning(NULL, 0, 0);
+  ASSERT(r == NULL);
+  double t = history_get_reasoning_time(NULL, 0, 0);
+  ASSERT(t == 0);
+  ChatHistory h;
+  history_init(&h);
+  history_set_reasoning(&h, 999, 0, "test", 100.0);
+  r = history_get_reasoning(&h, 999, 0);
+  ASSERT(r == NULL);
+  history_free(&h);
+  PASS();
+}
+
+TEST(reasoning_update_existing) {
+  ChatHistory h;
+  history_init(&h);
+  size_t idx = history_add(&h, "Hello");
+  history_set_reasoning(&h, idx, 0, "Original reasoning", 500.0);
+  ASSERT_EQ_STR("Original reasoning", history_get_reasoning(&h, idx, 0));
+  history_set_reasoning(&h, idx, 0, "Updated reasoning", 1000.0);
+  ASSERT_EQ_STR("Updated reasoning", history_get_reasoning(&h, idx, 0));
+  ASSERT(history_get_reasoning_time(&h, idx, 0) > 999.0);
+  history_free(&h);
+  PASS();
+}
+
+TEST(reasoning_empty_string) {
+  ChatHistory h;
+  history_init(&h);
+  size_t idx = history_add(&h, "Hello");
+  history_set_reasoning(&h, idx, 0, "", 50.0);
+  const char *r = history_get_reasoning(&h, idx, 0);
+  ASSERT_NOT_NULL(r);
+  ASSERT_EQ_STR("", r);
+  history_free(&h);
+  PASS();
+}
+
+TEST(reasoning_very_long) {
+  ChatHistory h;
+  history_init(&h);
+  size_t idx = history_add(&h, "Hello");
+  char *huge = malloc(100000);
+  ASSERT_NOT_NULL(huge);
+  memset(huge, 'x', 99999);
+  huge[99999] = '\0';
+  history_set_reasoning(&h, idx, 0, huge, 5000.0);
+  const char *r = history_get_reasoning(&h, idx, 0);
+  ASSERT_NOT_NULL(r);
+  ASSERT(strlen(r) == 99999);
+  free(huge);
+  history_free(&h);
+  PASS();
+}
+
+TEST(reasoning_set_null_clears) {
+  ChatHistory h;
+  history_init(&h);
+  size_t idx = history_add(&h, "Hello");
+  history_set_reasoning(&h, idx, 0, "Some reasoning", 100.0);
+  ASSERT_NOT_NULL(history_get_reasoning(&h, idx, 0));
+  history_set_reasoning(&h, idx, 0, NULL, 0.0);
+  ASSERT(history_get_reasoning(&h, idx, 0) == NULL);
+  history_free(&h);
+  PASS();
+}
+
+TEST(reasoning_toggle_expand) {
+  ui_reset_reasoning_state();
+  ASSERT(!ui_is_reasoning_expanded(0));
+  ASSERT(!ui_is_reasoning_expanded(5));
+  ui_toggle_reasoning(0);
+  ASSERT(ui_is_reasoning_expanded(0));
+  ASSERT(!ui_is_reasoning_expanded(5));
+  ui_toggle_reasoning(0);
+  ASSERT(!ui_is_reasoning_expanded(0));
+  ui_toggle_reasoning(5);
+  ASSERT(ui_is_reasoning_expanded(5));
+  ui_reset_reasoning_state();
+  ASSERT(!ui_is_reasoning_expanded(0));
+  ASSERT(!ui_is_reasoning_expanded(5));
+  PASS();
+}
+
+TEST(reasoning_toggle_out_of_bounds) {
+  ui_reset_reasoning_state();
+  ui_toggle_reasoning(999999);
+  ASSERT(!ui_is_reasoning_expanded(999999));
+  PASS();
+}
+
 void run_robustness_tests(void) {
   TEST_SUITE("Robustness Tests");
   RUN_TEST(robust_history_very_long_message);
@@ -694,4 +833,14 @@ void run_robustness_tests(void) {
   RUN_TEST(author_note_defaults);
   RUN_TEST(author_note_position_values);
   RUN_TEST(author_note_role_values);
+  RUN_TEST(reasoning_set_get_basic);
+  RUN_TEST(reasoning_null_on_missing);
+  RUN_TEST(reasoning_multiple_swipes);
+  RUN_TEST(reasoning_null_safety);
+  RUN_TEST(reasoning_update_existing);
+  RUN_TEST(reasoning_empty_string);
+  RUN_TEST(reasoning_very_long);
+  RUN_TEST(reasoning_set_null_clears);
+  RUN_TEST(reasoning_toggle_expand);
+  RUN_TEST(reasoning_toggle_out_of_bounds);
 }

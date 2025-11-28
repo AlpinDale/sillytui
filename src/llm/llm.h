@@ -11,6 +11,7 @@ int llm_tokenize(const ModelConfig *config, const char *text);
 
 LLMResponse llm_chat(const ModelConfig *config, const ChatHistory *history,
                      const LLMContext *context, LLMStreamCallback stream_cb,
+                     LLMReasoningCallback reasoning_cb,
                      LLMProgressCallback progress_cb, void *userdata);
 
 void llm_response_free(LLMResponse *resp);

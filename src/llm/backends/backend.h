@@ -27,30 +27,40 @@ typedef struct {
   char *content;
   size_t len;
   size_t cap;
+  char *reasoning;
+  size_t reasoning_len;
+  size_t reasoning_cap;
   bool success;
   char error[256];
   int prompt_tokens;
   int completion_tokens;
+  int reasoning_tokens;
   double elapsed_ms;
   double output_tps;
+  double reasoning_ms;
 } LLMResponse;
 
 typedef void (*LLMStreamCallback)(const char *chunk, void *userdata);
+typedef void (*LLMReasoningCallback)(const char *chunk, double elapsed_ms,
+                                     void *userdata);
 typedef void (*LLMProgressCallback)(void *userdata);
 
 typedef struct {
   LLMResponse *resp;
   LLMStreamCallback cb;
+  LLMReasoningCallback reasoning_cb;
   LLMProgressCallback progress_cb;
   void *userdata;
   char line_buffer[4096];
   size_t line_len;
   bool got_content;
+  bool in_reasoning;
   int prompt_tokens;
   int completion_tokens;
   bool is_anthropic;
   struct timeval first_token_time;
   struct timeval last_token_time;
+  struct timeval reasoning_start_time;
   bool has_first_token;
 } StreamCtx;
 

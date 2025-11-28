@@ -36,6 +36,11 @@ typedef struct {
   char *buffer;
   size_t buf_cap;
   size_t buf_len;
+  char *reasoning_buffer;
+  size_t reasoning_cap;
+  size_t reasoning_len;
+  bool in_reasoning;
+  long long reasoning_start_time;
   int spinner_frame;
   long long last_spinner_update;
   int *selected_msg;
@@ -107,9 +112,49 @@ static void progress_callback(void *userdata) {
 
   ctx->spinner_frame = (ctx->spinner_frame + 1) % SPINNER_FRAME_COUNT;
 
-  char display[128];
-  snprintf(display, sizeof(display), "Bot: *%s*",
-           SPINNER_FRAMES[ctx->spinner_frame]);
+  char display[256];
+  if (ctx->in_reasoning) {
+    double elapsed_s = (now - ctx->reasoning_start_time) / 1000.0;
+    snprintf(display, sizeof(display), "Bot: *💭 thinking... %.1fs*",
+             elapsed_s);
+  } else {
+    snprintf(display, sizeof(display), "Bot: *%s*",
+             SPINNER_FRAMES[ctx->spinner_frame]);
+  }
+  history_update(ctx->history, ctx->msg_index, display);
+  ui_draw_chat(ctx->chat_win, ctx->history, *ctx->selected_msg, ctx->model_name,
+               ctx->user_name, ctx->bot_name, false);
+  ui_draw_input_multiline(ctx->input_win, "", 0, true, 0, false);
+}
+
+static void reasoning_callback(const char *chunk, double elapsed_ms,
+                               void *userdata) {
+  StreamContext *ctx = userdata;
+
+  if (!ctx->in_reasoning) {
+    ctx->in_reasoning = true;
+    ctx->reasoning_start_time = get_time_ms();
+  }
+
+  size_t chunk_len = strlen(chunk);
+  if (ctx->reasoning_len + chunk_len + 1 > ctx->reasoning_cap) {
+    size_t new_cap = ctx->reasoning_cap == 0 ? 1024 : ctx->reasoning_cap * 2;
+    while (new_cap < ctx->reasoning_len + chunk_len + 1)
+      new_cap *= 2;
+    char *new_buf = realloc(ctx->reasoning_buffer, new_cap);
+    if (!new_buf)
+      return;
+    ctx->reasoning_buffer = new_buf;
+    ctx->reasoning_cap = new_cap;
+  }
+
+  memcpy(ctx->reasoning_buffer + ctx->reasoning_len, chunk, chunk_len);
+  ctx->reasoning_len += chunk_len;
+  ctx->reasoning_buffer[ctx->reasoning_len] = '\0';
+
+  char display[256];
+  double elapsed_s = elapsed_ms / 1000.0;
+  snprintf(display, sizeof(display), "Bot: *💭 thinking... %.1fs*", elapsed_s);
   history_update(ctx->history, ctx->msg_index, display);
   ui_draw_chat(ctx->chat_win, ctx->history, *ctx->selected_msg, ctx->model_name,
                ctx->user_name, ctx->bot_name, false);
@@ -166,6 +211,11 @@ static void do_llm_reply(ChatHistory *history, WINDOW *chat_win,
                        .buffer = NULL,
                        .buf_cap = 0,
                        .buf_len = 0,
+                       .reasoning_buffer = NULL,
+                       .reasoning_cap = 0,
+                       .reasoning_len = 0,
+                       .in_reasoning = false,
+                       .reasoning_start_time = 0,
                        .spinner_frame = 0,
                        .last_spinner_update = get_time_ms(),
                        .selected_msg = selected_msg,
@@ -178,7 +228,7 @@ static void do_llm_reply(ChatHistory *history, WINDOW *chat_win,
                               .capacity = history->capacity};
 
   LLMResponse resp = llm_chat(model, &hist_for_llm, llm_ctx, stream_callback,
-                              progress_callback, &ctx);
+                              reasoning_callback, progress_callback, &ctx);
 
   if (!resp.success) {
     char err_msg[512];
@@ -196,6 +246,10 @@ static void do_llm_reply(ChatHistory *history, WINDOW *chat_win,
                             resp.completion_tokens);
     history_set_gen_time(history, msg_index, active_swipe, resp.elapsed_ms);
     history_set_output_tps(history, msg_index, active_swipe, resp.output_tps);
+    if (ctx.reasoning_len > 0) {
+      history_set_reasoning(history, msg_index, active_swipe,
+                            ctx.reasoning_buffer, resp.reasoning_ms);
+    }
   }
 
   *selected_msg = MSG_SELECT_NONE;
@@ -203,6 +257,7 @@ static void do_llm_reply(ChatHistory *history, WINDOW *chat_win,
                bot_name, false);
 
   free(ctx.buffer);
+  free(ctx.reasoning_buffer);
   llm_response_free(&resp);
 }
 
@@ -335,6 +390,7 @@ static bool handle_slash_command(const char *input, Modal *modal,
   if (strcmp(input, "/chat new") == 0) {
     history_free(history);
     history_init(history);
+    ui_reset_reasoning_state();
     if (*char_loaded && character->first_mes && character->first_mes[0]) {
       char *substituted = macro_substitute(
           character->first_mes, character->name, persona_get_name(persona));
@@ -375,6 +431,7 @@ static bool handle_slash_command(const char *input, Modal *modal,
         }
         history_free(history);
         history_init(history);
+        ui_reset_reasoning_state();
         current_chat_id[0] = '\0';
         if (character->first_mes && character->first_mes[0]) {
           char *substituted = macro_substitute(
@@ -493,6 +550,7 @@ static bool handle_slash_command(const char *input, Modal *modal,
   if (strcmp(input, "/clear") == 0) {
     history_free(history);
     history_init(history);
+    ui_reset_reasoning_state();
     if (*char_loaded && character->first_mes && character->first_mes[0]) {
       char *substituted = macro_substitute(
           character->first_mes, character->name, persona_get_name(persona));
@@ -595,6 +653,7 @@ static bool handle_slash_command(const char *input, Modal *modal,
 int main(void) {
   ChatHistory history;
   history_init(&history);
+  ui_reset_reasoning_state();
 
   ModelsFile models;
   config_load_models(&models);
@@ -755,6 +814,7 @@ int main(void) {
         if (greeting) {
           history_free(&history);
           history_init(&history);
+          ui_reset_reasoning_state();
           current_chat_id[0] = '\0';
           char *substituted = macro_substitute(greeting, character.name,
                                                persona_get_name(&persona));
@@ -1262,6 +1322,11 @@ int main(void) {
                                    .buffer = NULL,
                                    .buf_cap = 0,
                                    .buf_len = 0,
+                                   .reasoning_buffer = NULL,
+                                   .reasoning_cap = 0,
+                                   .reasoning_len = 0,
+                                   .in_reasoning = false,
+                                   .reasoning_start_time = 0,
                                    .spinner_frame = 0,
                                    .last_spinner_update = get_time_ms(),
                                    .selected_msg = &selected_msg,
@@ -1275,7 +1340,7 @@ int main(void) {
 
               LLMResponse resp =
                   llm_chat(model, &hist_for_llm, &llm_ctx, stream_callback,
-                           progress_callback, &ctx);
+                           reasoning_callback, progress_callback, &ctx);
 
               if (!resp.success) {
                 char err_msg[512];
@@ -1293,9 +1358,15 @@ int main(void) {
                                      resp.elapsed_ms);
                 history_set_output_tps(&history, selected_msg, active_swipe,
                                        resp.output_tps);
+                if (ctx.reasoning_len > 0) {
+                  history_set_reasoning(&history, selected_msg, active_swipe,
+                                        ctx.reasoning_buffer,
+                                        resp.reasoning_ms);
+                }
               }
 
               free(ctx.buffer);
+              free(ctx.reasoning_buffer);
               llm_response_free(&resp);
             }
             selected_msg = MSG_SELECT_NONE;
@@ -1458,6 +1529,19 @@ int main(void) {
       move_mode = !move_mode;
       ui_draw_chat(chat_win, &history, selected_msg, get_model_name(&models),
                    user_disp, bot_disp, !input_focused);
+      continue;
+    }
+
+    if (ch == 't' && !input_focused && selected_msg >= 0 &&
+        selected_msg < (int)history.count) {
+      size_t active_swipe = history_get_active_swipe(&history, selected_msg);
+      const char *reasoning =
+          history_get_reasoning(&history, selected_msg, active_swipe);
+      if (reasoning && reasoning[0]) {
+        ui_toggle_reasoning((size_t)selected_msg);
+        ui_draw_chat(chat_win, &history, selected_msg, get_model_name(&models),
+                     user_disp, bot_disp, !input_focused);
+      }
       continue;
     }
 

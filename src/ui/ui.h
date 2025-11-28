@@ -70,6 +70,10 @@ void ui_init_colors(void);
 int ui_calc_input_height(const char *buffer, int win_width);
 void ui_layout_windows_with_input(WINDOW **chat_win, WINDOW **input_win,
                                   int input_height);
+
+bool ui_is_reasoning_expanded(size_t msg_index);
+void ui_toggle_reasoning(size_t msg_index);
+void ui_reset_reasoning_state(void);
 void ui_draw_chat_ex(WINDOW *chat_win, const ChatHistory *history,
                      int selected_msg, const char *model_name,
                      const char *user_name, const char *bot_name,

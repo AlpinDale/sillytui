@@ -447,12 +447,40 @@ static void openai_parse_stream(StreamCtx *ctx, const char *line) {
   if (!delta)
     return;
 
-  const char *content_key = strstr(delta, "\"content\"");
-  if (!content_key)
+  char *reasoning = find_json_string(delta, "reasoning_content");
+  if (reasoning && reasoning[0]) {
+    if (!ctx->in_reasoning) {
+      ctx->in_reasoning = true;
+      gettimeofday(&ctx->reasoning_start_time, NULL);
+    }
+    if (!ctx->has_first_token) {
+      gettimeofday(&ctx->first_token_time, NULL);
+      ctx->has_first_token = true;
+    }
+    gettimeofday(&ctx->last_token_time, NULL);
+    append_to_reasoning(ctx->resp, reasoning, strlen(reasoning));
+    if (ctx->reasoning_cb) {
+      struct timeval now;
+      gettimeofday(&now, NULL);
+      double elapsed_ms =
+          (now.tv_sec - ctx->reasoning_start_time.tv_sec) * 1000.0 +
+          (now.tv_usec - ctx->reasoning_start_time.tv_usec) / 1000.0;
+      ctx->reasoning_cb(reasoning, elapsed_ms, ctx->userdata);
+    }
+    free(reasoning);
     return;
+  }
 
   char *content = find_json_string(delta, "content");
   if (content && content[0]) {
+    if (ctx->in_reasoning) {
+      struct timeval now;
+      gettimeofday(&now, NULL);
+      ctx->resp->reasoning_ms =
+          (now.tv_sec - ctx->reasoning_start_time.tv_sec) * 1000.0 +
+          (now.tv_usec - ctx->reasoning_start_time.tv_usec) / 1000.0;
+      ctx->in_reasoning = false;
+    }
     if (!ctx->has_first_token) {
       gettimeofday(&ctx->first_token_time, NULL);
       ctx->has_first_token = true;
