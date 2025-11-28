@@ -1,5 +1,7 @@
 #include "common.h"
+#include "chat/history.h"
 #include "core/macros.h"
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -418,4 +420,387 @@ int count_tokens_with_tokenizer(ChatTokenizer *tokenizer,
 
 int count_tokens(const ModelConfig *config, const char *text) {
   return count_tokens_with_tokenizer(g_current_tokenizer, config, text);
+}
+
+bool ensure_buffer_capacity(RequestBuilder *rb, size_t needed) {
+  if (!rb || !rb->body || !rb->pos || !rb->cap)
+    return false;
+  
+  if (*rb->pos + needed < *rb->cap)
+    return true;
+  
+  size_t new_cap = (*rb->cap == 0) ? 16384 : *rb->cap * 2;
+  while (new_cap < *rb->pos + needed)
+    new_cap *= 2;
+  
+  char *tmp = realloc(*rb->body, new_cap);
+  if (!tmp)
+    return false;
+  
+  *rb->body = tmp;
+  *rb->cap = new_cap;
+  return true;
+}
+
+void add_message_to_json(RequestBuilder *rb, bool *first, const char *role, const char *content) {
+  if (!rb || !rb->body || !rb->pos || !rb->cap || !first || !role || !content)
+    return;
+  
+  char *escaped = escape_json_string(content);
+  if (!escaped)
+    return;
+  
+  size_t needed = strlen(escaped) + strlen(role) + 64;
+  if (!ensure_buffer_capacity(rb, needed)) {
+    free(escaped);
+    return;
+  }
+  
+  if (!*first) {
+    (*rb->body)[(*rb->pos)++] = ',';
+  }
+  *first = false;
+  
+  *rb->pos += snprintf(*rb->body + *rb->pos, *rb->cap - *rb->pos,
+                       "{\"role\":\"%s\",\"content\":\"%s\"}", role, escaped);
+  free(escaped);
+}
+
+size_t calculate_history_start_index(const ModelConfig *config, const ChatHistory *history,
+                                     int available_tokens) {
+  if (!config || !history || available_tokens <= 0 || history->count == 0)
+    return 0;
+  
+  int cumulative_tokens = 0;
+  for (size_t i = history->count; i > 0; i--) {
+    const char *msg = history_get(history, i - 1);
+    if (!msg)
+      continue;
+    
+    int msg_tokens = count_tokens(config, msg) + 20;
+    if (cumulative_tokens + msg_tokens > available_tokens) {
+      return i;
+    }
+    cumulative_tokens += msg_tokens;
+  }
+  
+  return 0;
+}
+
+void process_history_message(const char *msg, MessageRole msg_role,
+                             const char *char_name, const char *user_name,
+                             char **out_content) {
+  if (!msg || !out_content) {
+    if (out_content)
+      *out_content = NULL;
+    return;
+  }
+  
+  const char *content = msg;
+  
+  if (msg_role == ROLE_USER && strncmp(msg, "You: ", 5) == 0) {
+    content = msg + 5;
+  } else if (msg_role == ROLE_ASSISTANT && strncmp(msg, "Bot: ", 5) == 0) {
+    content = msg + 5;
+  } else if (msg_role == ROLE_ASSISTANT && strncmp(msg, "Bot:", 4) == 0) {
+    content = msg + 4;
+    while (*content == ' ')
+      content++;
+  }
+  
+  char *expanded = expand_attachments(content);
+  char *substituted = macro_substitute(expanded ? expanded : content, char_name, user_name);
+  if (expanded)
+    free(expanded);
+  
+  *out_content = substituted;
+}
+
+void add_sampler_settings_openai_compatible(RequestBuilder *rb, const ModelConfig *config,
+                                            const SamplerSettings *s) {
+  if (!rb || !rb->body || !rb->pos || !rb->cap || !s)
+    return;
+  
+  if (s->temperature != 1.0) {
+    ensure_buffer_capacity(rb, 64);
+    *rb->pos += snprintf(*rb->body + *rb->pos, *rb->cap - *rb->pos,
+                         ",\"temperature\":%.4g", s->temperature);
+  }
+  if (s->top_p != 1.0) {
+    ensure_buffer_capacity(rb, 32);
+    *rb->pos += snprintf(*rb->body + *rb->pos, *rb->cap - *rb->pos,
+                         ",\"top_p\":%.4g", s->top_p);
+  }
+  if (s->frequency_penalty != 0.0) {
+    ensure_buffer_capacity(rb, 64);
+    *rb->pos += snprintf(*rb->body + *rb->pos, *rb->cap - *rb->pos,
+                         ",\"frequency_penalty\":%.4g", s->frequency_penalty);
+  }
+  if (s->presence_penalty != 0.0) {
+    ensure_buffer_capacity(rb, 64);
+    *rb->pos += snprintf(*rb->body + *rb->pos, *rb->cap - *rb->pos,
+                         ",\"presence_penalty\":%.4g", s->presence_penalty);
+  }
+  
+  if (config && (config->api_type == API_TYPE_APHRODITE ||
+                 config->api_type == API_TYPE_VLLM ||
+                 config->api_type == API_TYPE_LLAMACPP ||
+                 config->api_type == API_TYPE_TABBY)) {
+    if (s->top_k > 0) {
+      ensure_buffer_capacity(rb, 32);
+      *rb->pos += snprintf(*rb->body + *rb->pos, *rb->cap - *rb->pos,
+                           ",\"top_k\":%d", s->top_k);
+    }
+    if (s->min_p > 0.0) {
+      ensure_buffer_capacity(rb, 32);
+      *rb->pos += snprintf(*rb->body + *rb->pos, *rb->cap - *rb->pos,
+                           ",\"min_p\":%.4g", s->min_p);
+    }
+    if (s->repetition_penalty != 1.0) {
+      ensure_buffer_capacity(rb, 64);
+      *rb->pos += snprintf(*rb->body + *rb->pos, *rb->cap - *rb->pos,
+                           ",\"repetition_penalty\":%.4g", s->repetition_penalty);
+    }
+    if (s->typical_p != 1.0) {
+      ensure_buffer_capacity(rb, 32);
+      *rb->pos += snprintf(*rb->body + *rb->pos, *rb->cap - *rb->pos,
+                           ",\"typical_p\":%.4g", s->typical_p);
+    }
+    if (s->tfs != 1.0) {
+      ensure_buffer_capacity(rb, 32);
+      *rb->pos += snprintf(*rb->body + *rb->pos, *rb->cap - *rb->pos,
+                           ",\"tfs\":%.4g", s->tfs);
+    }
+    if (s->top_a > 0.0) {
+      ensure_buffer_capacity(rb, 32);
+      *rb->pos += snprintf(*rb->body + *rb->pos, *rb->cap - *rb->pos,
+                           ",\"top_a\":%.4g", s->top_a);
+    }
+    if (s->min_tokens > 0) {
+      ensure_buffer_capacity(rb, 32);
+      *rb->pos += snprintf(*rb->body + *rb->pos, *rb->cap - *rb->pos,
+                           ",\"min_tokens\":%d", s->min_tokens);
+    }
+  }
+  
+  if (config && config->api_type == API_TYPE_APHRODITE) {
+    if (s->smoothing_factor > 0.0) {
+      ensure_buffer_capacity(rb, 64);
+      *rb->pos += snprintf(*rb->body + *rb->pos, *rb->cap - *rb->pos,
+                           ",\"smoothing_factor\":%.4g", s->smoothing_factor);
+    }
+    if (s->dynatemp_min > 0.0 || s->dynatemp_max > 0.0) {
+      ensure_buffer_capacity(rb, 128);
+      *rb->pos += snprintf(*rb->body + *rb->pos, *rb->cap - *rb->pos,
+                           ",\"dynatemp_min\":%.4g", s->dynatemp_min);
+      *rb->pos += snprintf(*rb->body + *rb->pos, *rb->cap - *rb->pos,
+                           ",\"dynatemp_max\":%.4g", s->dynatemp_max);
+      *rb->pos += snprintf(*rb->body + *rb->pos, *rb->cap - *rb->pos,
+                           ",\"dynatemp_exponent\":%.4g", s->dynatemp_exponent);
+    }
+    if (s->mirostat_mode > 0) {
+      ensure_buffer_capacity(rb, 96);
+      *rb->pos += snprintf(*rb->body + *rb->pos, *rb->cap - *rb->pos,
+                           ",\"mirostat_mode\":%d", s->mirostat_mode);
+      *rb->pos += snprintf(*rb->body + *rb->pos, *rb->cap - *rb->pos,
+                           ",\"mirostat_tau\":%.4g", s->mirostat_tau);
+      *rb->pos += snprintf(*rb->body + *rb->pos, *rb->cap - *rb->pos,
+                           ",\"mirostat_eta\":%.4g", s->mirostat_eta);
+    }
+    if (s->dry_multiplier > 0.0) {
+      ensure_buffer_capacity(rb, 128);
+      *rb->pos += snprintf(*rb->body + *rb->pos, *rb->cap - *rb->pos,
+                           ",\"dry_multiplier\":%.4g", s->dry_multiplier);
+      *rb->pos += snprintf(*rb->body + *rb->pos, *rb->cap - *rb->pos,
+                           ",\"dry_base\":%.4g", s->dry_base);
+      *rb->pos += snprintf(*rb->body + *rb->pos, *rb->cap - *rb->pos,
+                           ",\"dry_allowed_length\":%d", s->dry_allowed_length);
+      *rb->pos += snprintf(*rb->body + *rb->pos, *rb->cap - *rb->pos,
+                           ",\"dry_range\":%d", s->dry_range);
+    }
+    if (s->xtc_probability > 0.0) {
+      ensure_buffer_capacity(rb, 64);
+      *rb->pos += snprintf(*rb->body + *rb->pos, *rb->cap - *rb->pos,
+                           ",\"xtc_threshold\":%.4g", s->xtc_threshold);
+      *rb->pos += snprintf(*rb->body + *rb->pos, *rb->cap - *rb->pos,
+                           ",\"xtc_probability\":%.4g", s->xtc_probability);
+    }
+    if (s->nsigma > 0.0) {
+      ensure_buffer_capacity(rb, 32);
+      *rb->pos += snprintf(*rb->body + *rb->pos, *rb->cap - *rb->pos,
+                           ",\"nsigma\":%.4g", s->nsigma);
+    }
+    if (s->skew != 0.0) {
+      ensure_buffer_capacity(rb, 32);
+      *rb->pos += snprintf(*rb->body + *rb->pos, *rb->cap - *rb->pos,
+                           ",\"skew\":%.4g", s->skew);
+    }
+  }
+  
+  for (int i = 0; i < s->custom_count; i++) {
+    const CustomSampler *cs = &s->custom[i];
+    if (cs->type == SAMPLER_TYPE_STRING) {
+      char *escaped = escape_json_string(cs->str_value);
+      ensure_buffer_capacity(rb, strlen(cs->name) + strlen(escaped ? escaped : cs->str_value) + 32);
+      *rb->pos += snprintf(*rb->body + *rb->pos, *rb->cap - *rb->pos,
+                           ",\"%s\":\"%s\"", cs->name, escaped ? escaped : cs->str_value);
+      free(escaped);
+    } else if (cs->type == SAMPLER_TYPE_INT) {
+      ensure_buffer_capacity(rb, strlen(cs->name) + 32);
+      *rb->pos += snprintf(*rb->body + *rb->pos, *rb->cap - *rb->pos,
+                           ",\"%s\":%d", cs->name, (int)cs->value);
+    } else if (cs->type == SAMPLER_TYPE_BOOL) {
+      ensure_buffer_capacity(rb, strlen(cs->name) + 16);
+      *rb->pos += snprintf(*rb->body + *rb->pos, *rb->cap - *rb->pos,
+                           ",\"%s\":%s", cs->name, cs->value != 0 ? "true" : "false");
+    } else if (cs->type == SAMPLER_TYPE_LIST_FLOAT || cs->type == SAMPLER_TYPE_LIST_INT) {
+      ensure_buffer_capacity(rb, strlen(cs->name) + cs->list_count * 32 + 32);
+      *rb->pos += snprintf(*rb->body + *rb->pos, *rb->cap - *rb->pos, ",\"%s\":[", cs->name);
+      for (int j = 0; j < cs->list_count; j++) {
+        if (cs->type == SAMPLER_TYPE_LIST_INT)
+          *rb->pos += snprintf(*rb->body + *rb->pos, *rb->cap - *rb->pos,
+                               "%d", (int)cs->list_values[j]);
+        else
+          *rb->pos += snprintf(*rb->body + *rb->pos, *rb->cap - *rb->pos,
+                               "%.4g", cs->list_values[j]);
+        if (j < cs->list_count - 1)
+          *rb->pos += snprintf(*rb->body + *rb->pos, *rb->cap - *rb->pos, ",");
+      }
+      *rb->pos += snprintf(*rb->body + *rb->pos, *rb->cap - *rb->pos, "]");
+    } else if (cs->type == SAMPLER_TYPE_LIST_STRING) {
+      ensure_buffer_capacity(rb, strlen(cs->name) + cs->list_count * 128 + 32);
+      *rb->pos += snprintf(*rb->body + *rb->pos, *rb->cap - *rb->pos, ",\"%s\":[", cs->name);
+      for (int j = 0; j < cs->list_count; j++) {
+        char *escaped = escape_json_string(cs->list_strings[j]);
+        *rb->pos += snprintf(*rb->body + *rb->pos, *rb->cap - *rb->pos,
+                             "\"%s\"", escaped ? escaped : cs->list_strings[j]);
+        free(escaped);
+        if (j < cs->list_count - 1)
+          *rb->pos += snprintf(*rb->body + *rb->pos, *rb->cap - *rb->pos, ",");
+      }
+      *rb->pos += snprintf(*rb->body + *rb->pos, *rb->cap - *rb->pos, "]");
+    } else if (cs->type == SAMPLER_TYPE_DICT) {
+      ensure_buffer_capacity(rb, strlen(cs->name) + cs->dict_count * 128 + 32);
+      *rb->pos += snprintf(*rb->body + *rb->pos, *rb->cap - *rb->pos, ",\"%s\":{", cs->name);
+      for (int j = 0; j < cs->dict_count; j++) {
+        const DictEntry *de = &cs->dict_entries[j];
+        if (de->is_string) {
+          char *escaped = escape_json_string(de->str_val);
+          *rb->pos += snprintf(*rb->body + *rb->pos, *rb->cap - *rb->pos,
+                               "\"%s\":\"%s\"", de->key, escaped ? escaped : de->str_val);
+          free(escaped);
+        } else {
+          *rb->pos += snprintf(*rb->body + *rb->pos, *rb->cap - *rb->pos,
+                               "\"%s\":%.4g", de->key, de->num_val);
+        }
+        if (j < cs->dict_count - 1)
+          *rb->pos += snprintf(*rb->body + *rb->pos, *rb->cap - *rb->pos, ",");
+      }
+      *rb->pos += snprintf(*rb->body + *rb->pos, *rb->cap - *rb->pos, "}");
+    } else {
+      ensure_buffer_capacity(rb, strlen(cs->name) + 32);
+      *rb->pos += snprintf(*rb->body + *rb->pos, *rb->cap - *rb->pos,
+                           ",\"%s\":%.4g", cs->name, cs->value);
+    }
+  }
+}
+
+void add_sampler_settings_anthropic(RequestBuilder *rb, const SamplerSettings *s) {
+  if (!rb || !rb->body || !rb->pos || !rb->cap || !s)
+    return;
+  
+  if (s->temperature != 1.0) {
+    ensure_buffer_capacity(rb, 64);
+    *rb->pos += snprintf(*rb->body + *rb->pos, *rb->cap - *rb->pos,
+                         ",\"temperature\":%.4g", s->temperature);
+  }
+  if (s->top_p != 1.0) {
+    ensure_buffer_capacity(rb, 32);
+    *rb->pos += snprintf(*rb->body + *rb->pos, *rb->cap - *rb->pos,
+                         ",\"top_p\":%.4g", s->top_p);
+  }
+  if (s->top_k > 0) {
+    ensure_buffer_capacity(rb, 32);
+    *rb->pos += snprintf(*rb->body + *rb->pos, *rb->cap - *rb->pos,
+                         ",\"top_k\":%d", s->top_k);
+  }
+}
+
+void add_sampler_settings_kobold(RequestBuilder *rb, const SamplerSettings *s) {
+  if (!rb || !rb->body || !rb->pos || !rb->cap || !s)
+    return;
+  
+  if (s->temperature != 1.0) {
+    ensure_buffer_capacity(rb, 64);
+    *rb->pos += snprintf(*rb->body + *rb->pos, *rb->cap - *rb->pos,
+                         ",\"temperature\":%.4g", s->temperature);
+  }
+  if (s->top_p != 1.0) {
+    ensure_buffer_capacity(rb, 32);
+    *rb->pos += snprintf(*rb->body + *rb->pos, *rb->cap - *rb->pos,
+                         ",\"top_p\":%.4g", s->top_p);
+  }
+  if (s->frequency_penalty != 0.0) {
+    ensure_buffer_capacity(rb, 64);
+    *rb->pos += snprintf(*rb->body + *rb->pos, *rb->cap - *rb->pos,
+                         ",\"frequency_penalty\":%.4g", s->frequency_penalty);
+  }
+  if (s->presence_penalty != 0.0) {
+    ensure_buffer_capacity(rb, 64);
+    *rb->pos += snprintf(*rb->body + *rb->pos, *rb->cap - *rb->pos,
+                         ",\"presence_penalty\":%.4g", s->presence_penalty);
+  }
+  if (s->top_k > 0) {
+    ensure_buffer_capacity(rb, 32);
+    *rb->pos += snprintf(*rb->body + *rb->pos, *rb->cap - *rb->pos,
+                         ",\"top_k\":%d", s->top_k);
+  }
+  if (s->min_p > 0.0) {
+    ensure_buffer_capacity(rb, 32);
+    *rb->pos += snprintf(*rb->body + *rb->pos, *rb->cap - *rb->pos,
+                         ",\"min_p\":%.4g", s->min_p);
+  }
+  if (s->repetition_penalty != 1.0) {
+    ensure_buffer_capacity(rb, 64);
+    *rb->pos += snprintf(*rb->body + *rb->pos, *rb->cap - *rb->pos,
+                         ",\"repetition_penalty\":%.4g", s->repetition_penalty);
+  }
+  if (s->typical_p != 1.0) {
+    ensure_buffer_capacity(rb, 32);
+    *rb->pos += snprintf(*rb->body + *rb->pos, *rb->cap - *rb->pos,
+                         ",\"typical_p\":%.4g", s->typical_p);
+  }
+  if (s->tfs != 1.0) {
+    ensure_buffer_capacity(rb, 32);
+    *rb->pos += snprintf(*rb->body + *rb->pos, *rb->cap - *rb->pos,
+                         ",\"tfs\":%.4g", s->tfs);
+  }
+  if (s->min_tokens > 0) {
+    ensure_buffer_capacity(rb, 32);
+    *rb->pos += snprintf(*rb->body + *rb->pos, *rb->cap - *rb->pos,
+                         ",\"min_tokens\":%d", s->min_tokens);
+  }
+  
+  for (int i = 0; i < s->custom_count; i++) {
+    const CustomSampler *cs = &s->custom[i];
+    if (cs->type == SAMPLER_TYPE_STRING) {
+      char *escaped = escape_json_string(cs->str_value);
+      ensure_buffer_capacity(rb, strlen(cs->name) + strlen(escaped ? escaped : cs->str_value) + 32);
+      *rb->pos += snprintf(*rb->body + *rb->pos, *rb->cap - *rb->pos,
+                           ",\"%s\":\"%s\"", cs->name, escaped ? escaped : cs->str_value);
+      free(escaped);
+    } else if (cs->type == SAMPLER_TYPE_INT) {
+      ensure_buffer_capacity(rb, strlen(cs->name) + 32);
+      *rb->pos += snprintf(*rb->body + *rb->pos, *rb->cap - *rb->pos,
+                           ",\"%s\":%d", cs->name, (int)cs->value);
+    } else if (cs->type == SAMPLER_TYPE_BOOL) {
+      ensure_buffer_capacity(rb, strlen(cs->name) + 16);
+      *rb->pos += snprintf(*rb->body + *rb->pos, *rb->cap - *rb->pos,
+                           ",\"%s\":%s", cs->name, cs->value != 0 ? "true" : "false");
+    } else {
+      ensure_buffer_capacity(rb, strlen(cs->name) + 32);
+      *rb->pos += snprintf(*rb->body + *rb->pos, *rb->cap - *rb->pos,
+                           ",\"%s\":%.4g", cs->name, cs->value);
+    }
+  }
 }

@@ -38,4 +38,22 @@ size_t stream_callback(char *ptr, size_t size, size_t nmemb, void *userdata);
 int progress_callback(void *clientp, curl_off_t dltotal, curl_off_t dlnow,
                       curl_off_t ultotal, curl_off_t ulnow);
 
+typedef struct {
+  char **body;
+  size_t *pos;
+  size_t *cap;
+} RequestBuilder;
+
+bool ensure_buffer_capacity(RequestBuilder *rb, size_t needed);
+void add_message_to_json(RequestBuilder *rb, bool *first, const char *role, const char *content);
+size_t calculate_history_start_index(const ModelConfig *config, const ChatHistory *history, 
+                                     int available_tokens);
+void process_history_message(const char *msg, MessageRole msg_role, 
+                             const char *char_name, const char *user_name,
+                             char **out_content);
+void add_sampler_settings_openai_compatible(RequestBuilder *rb, const ModelConfig *config,
+                                             const SamplerSettings *s);
+void add_sampler_settings_anthropic(RequestBuilder *rb, const SamplerSettings *s);
+void add_sampler_settings_kobold(RequestBuilder *rb, const SamplerSettings *s);
+
 #endif
