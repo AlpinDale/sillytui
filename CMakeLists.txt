@@ -21,7 +21,11 @@ set(SOURCES
     src/chat/history.c
     src/chat/author_note.c
     src/llm/llm.c
+    src/llm/common.c
     src/llm/sampler.c
+    src/llm/backends/openai.c
+    src/llm/backends/anthropic.c
+    src/llm/backends/kobold.c
     src/character/character.c
     src/character/persona.c
     src/tokenizer/tiktoken.c

@@ -1,6 +1,7 @@
 #include "ui/ui.h"
 #include "chat/chat.h"
 #include "chat/history.h"
+#include "core/macros.h"
 #include "ui/markdown.h"
 #include <ctype.h>
 #include <stdlib.h>
@@ -250,12 +251,17 @@ typedef struct {
 
 static int build_display_lines(const ChatHistory *history, int content_width,
                                DisplayLine *lines, int max_lines,
-                               const InPlaceEdit *edit) {
+                               const InPlaceEdit *edit, const char *char_name,
+                               const char *user_name, char **subst_strs,
+                               int *subst_count) {
   int total = 0;
   int gutter_width = 3;
   int text_width = content_width - gutter_width;
   if (text_width < 10)
     text_width = 10;
+
+  if (subst_count)
+    *subst_count = 0;
 
   WrappedLine *wrapped = malloc(sizeof(WrappedLine) * 200);
   if (!wrapped)
@@ -274,17 +280,26 @@ static int build_display_lines(const ChatHistory *history, int content_width,
     bool is_bot = (role == ROLE_ASSISTANT);
     bool is_system = (role == ROLE_SYSTEM);
 
-    const char *content;
+    const char *raw_content;
     if (use_edit_buffer) {
-      content = edit->buffer;
+      raw_content = edit->buffer;
     } else if (is_user && starts_with(msg, "You: ")) {
-      content = msg + 5;
+      raw_content = msg + 5;
     } else if (is_bot && starts_with(msg, "Bot:")) {
-      content = msg + 4;
-      while (*content == ' ')
-        content++;
+      raw_content = msg + 4;
+      while (*raw_content == ' ')
+        raw_content++;
     } else {
-      content = msg;
+      raw_content = msg;
+    }
+
+    char *substituted = NULL;
+    if (char_name || user_name) {
+      substituted = macro_substitute(raw_content, char_name, user_name);
+    }
+    const char *content = substituted ? substituted : raw_content;
+    if (substituted && subst_strs && subst_count && *subst_count < 500) {
+      subst_strs[(*subst_count)++] = substituted;
     }
 
     if ((is_user || is_bot || is_system) && total < max_lines) {
@@ -401,8 +416,10 @@ int ui_get_msg_scroll_offset(WINDOW *chat_win, const ChatHistory *history,
   if (!all_lines)
     return -1;
 
+  int subst_count = 0;
   int total_display_lines =
-      build_display_lines(history, content_width, all_lines, max_display, edit);
+      build_display_lines(history, content_width, all_lines, max_display, edit,
+                          NULL, NULL, NULL, &subst_count);
 
   int msg_start_line = -1;
   int msg_end_line = -1;
@@ -498,8 +515,11 @@ void ui_draw_chat_ex(WINDOW *chat_win, const ChatHistory *history,
     return;
   }
 
+  char *subst_strs[500];
+  int subst_count = 0;
   int total_display_lines =
-      build_display_lines(history, content_width, all_lines, max_display, edit);
+      build_display_lines(history, content_width, all_lines, max_display, edit,
+                          bot_name, user_name, subst_strs, &subst_count);
 
   int max_scroll = total_display_lines - usable_lines;
   if (max_scroll < 0)
@@ -792,6 +812,9 @@ void ui_draw_chat_ex(WINDOW *chat_win, const ChatHistory *history,
     }
   }
 
+  for (int i = 0; i < subst_count; i++) {
+    free(subst_strs[i]);
+  }
   free(all_lines);
   wrefresh(chat_win);
 }
