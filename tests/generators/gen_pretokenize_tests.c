@@ -205,7 +205,9 @@ int main(void) {
 
     printf("  int result = pretokenize_cl100k(input, &spans);\n");
     printf("  ASSERT(result >= 0);\n");
-    printf("  ASSERT(spans.count >= %d);\n", CASES[i].min_spans);
+    if (CASES[i].min_spans > 0) {
+      printf("  ASSERT(spans.count >= %d);\n", CASES[i].min_spans);
+    }
     if (CASES[i].max_spans > 0) {
       printf("  ASSERT(spans.count <= %d);\n", CASES[i].max_spans);
     }
