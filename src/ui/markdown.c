@@ -1,4 +1,3 @@
-#define _XOPEN_SOURCE 700
 #include "ui/markdown.h"
 #include <ctype.h>
 #include <stdlib.h>

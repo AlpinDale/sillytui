@@ -1859,7 +1859,7 @@ static void draw_sampler_settings(Modal *m) {
       mvwaddch(w, dy + dh - 1, dx + dw - 1, ACS_LRCORNER);
       wattroff(w, COLOR_PAIR(COLOR_PAIR_BORDER));
 
-      char title[64];
+      char title[128];
       snprintf(title, sizeof(title), " %s (%d items) ", cs->name,
                cs->list_count);
       wattron(w, A_BOLD);
@@ -1969,7 +1969,7 @@ static void draw_sampler_settings(Modal *m) {
       mvwaddch(w, dy + dh - 1, dx + dw - 1, ACS_LRCORNER);
       wattroff(w, COLOR_PAIR(COLOR_PAIR_BORDER));
 
-      char title[64];
+      char title[128];
       snprintf(title, sizeof(title), " %s (%d keys) ", cs->name,
                cs->dict_count);
       wattron(w, A_BOLD);
@@ -2020,7 +2020,7 @@ static void draw_sampler_settings(Modal *m) {
         mvwaddstr(w, row, dx + 19, ":");
         wattroff(w, A_DIM);
 
-        char val_disp[32];
+        char val_disp[128];
         if (de->is_string)
           snprintf(val_disp, sizeof(val_disp), "\"%s\"", de->str_val);
         else

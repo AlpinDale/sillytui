@@ -602,7 +602,7 @@ static bool handle_slash_command(const char *input, Modal *modal,
   }
   if (strcmp(input, "/note") == 0) {
     if (author_note->text[0]) {
-      char msg[512];
+      char msg[4200];
       snprintf(msg, sizeof(msg),
                "Author's Note:\n\n\"%s\"\n\n"
                "Depth: %d  |  Position: %s  |  Role: %s",
@@ -719,8 +719,8 @@ static bool handle_slash_command(const char *input, Modal *modal,
     int uid = atoi(input + 13);
     if (uid > 0 && lorebook_toggle_entry(lorebook, uid)) {
       LoreEntry *e = lorebook_get_entry(lorebook, uid);
-      char msg[128];
-      snprintf(msg, sizeof(msg), "Entry %d (%s) is now %s", uid,
+      char msg[256];
+      snprintf(msg, sizeof(msg), "Entry %d (%.64s) is now %s", uid,
                e ? e->comment : "?", e && e->disabled ? "disabled" : "enabled");
       modal_open_message(modal, msg, false);
     } else {

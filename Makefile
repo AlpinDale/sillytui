@@ -1,7 +1,16 @@
 BUILD_DIR ?= build
 SRC_FILES := $(shell find src tests -name '*.c' -o -name '*.h')
+
+# Detect platform
+UNAME_M := $(shell uname -m)
+ifeq ($(UNAME_M),x86_64)
+    SIMD_ASM := src/tokenizer/simd_x86_64.S
+else
+    SIMD_ASM := src/tokenizer/simd_arm64.S
+endif
+
 TOKENIZE_SRCS := examples/tokenize.c src/tokenizer/tiktoken.c src/tokenizer/gpt2bpe.c \
-	src/tokenizer/sentencepiece.c src/tokenizer/simd.c src/tokenizer/simd_arm64.S \
+	src/tokenizer/sentencepiece.c src/tokenizer/simd.c $(SIMD_ASM) \
 	src/tokenizer/unicode_tables.c
 
 .PHONY: all configure build build-all run clean distclean format format-check tokenize example test

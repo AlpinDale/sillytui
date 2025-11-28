@@ -7,6 +7,16 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 add_compile_options(-Wall -Wextra -Werror)
 
+# POSIX feature test macros for nftw and other functions (Linux only)
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    add_compile_definitions(_XOPEN_SOURCE=500 _GNU_SOURCE)
+endif()
+
+# Enable AVX2 for x86_64
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
+    add_compile_options(-march=x86-64-v3)
+endif()
+
 find_package(Curses REQUIRED)
 find_package(CURL REQUIRED)
 
@@ -39,6 +49,9 @@ set(SOURCES
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "arm64|aarch64")
     enable_language(ASM)
     list(APPEND SOURCES src/tokenizer/simd_arm64.S)
+elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
+    enable_language(ASM)
+    list(APPEND SOURCES src/tokenizer/simd_x86_64.S)
 endif()
 
 add_executable(sillytui ${SOURCES})
@@ -74,6 +87,8 @@ set(TEST_SOURCES
 
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "arm64|aarch64")
     list(APPEND TEST_SOURCES src/tokenizer/simd_arm64.S)
+elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
+    list(APPEND TEST_SOURCES src/tokenizer/simd_x86_64.S)
 endif()
 
 add_executable(run_tests ${TEST_SOURCES})
@@ -110,6 +125,8 @@ set(INTEGRATION_TEST_SOURCES
 
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "arm64|aarch64")
     list(APPEND INTEGRATION_TEST_SOURCES src/tokenizer/simd_arm64.S)
+elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
+    list(APPEND INTEGRATION_TEST_SOURCES src/tokenizer/simd_x86_64.S)
 endif()
 
 add_executable(run_integration_tests ${INTEGRATION_TEST_SOURCES})
@@ -168,6 +185,8 @@ set(ALL_TEST_SOURCES
 
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "arm64|aarch64")
     list(APPEND ALL_TEST_SOURCES src/tokenizer/simd_arm64.S)
+elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
+    list(APPEND ALL_TEST_SOURCES src/tokenizer/simd_x86_64.S)
 endif()
 
 add_executable(run_all_tests ${ALL_TEST_SOURCES})
