@@ -19,6 +19,7 @@
 #include "llm/llm.h"
 #include "llm/sampler.h"
 #include "lore/lorebook.h"
+#include "tokenizer/selector.h"
 #include "ui/markdown.h"
 #include "ui/modal.h"
 #include "ui/ui.h"
@@ -285,6 +286,8 @@ static const SlashCommand SLASH_COMMANDS[] = {
     {"lore list", "List lorebook entries"},
     {"lore toggle", "Toggle lorebook entry"},
     {"lore clear", "Unload lorebook"},
+    {"tokenizer", "Select tokenizer (local or API)"},
+    {"tokenize", "Open token counter"},
     {"help", "Show available commands"},
     {"clear", "Clear chat history"},
     {"quit", "Exit the application"},
@@ -296,7 +299,7 @@ static bool handle_slash_command(const char *input, Modal *modal,
                                  char *current_chat_id, char *current_char_path,
                                  CharacterCard *character, Persona *persona,
                                  bool *char_loaded, AuthorNote *author_note,
-                                 Lorebook *lorebook) {
+                                 Lorebook *lorebook, ChatTokenizer *tokenizer) {
   if (strcmp(input, "/model set") == 0) {
     modal_open_model_set(modal);
     return true;
@@ -540,9 +543,9 @@ static bool handle_slash_command(const char *input, Modal *modal,
                        "/note <text>       - Set author's note\n"
                        "/note-depth <n>    - Set note depth\n"
                        "/lore load <file>  - Load lorebook\n"
-                       "/lore info         - Lorebook info\n"
                        "/lore list         - List entries\n"
-                       "/lore toggle <id>  - Toggle entry\n"
+                       "/tokenizer <name>  - Set tokenizer\n"
+                       "/tokenize          - Token counter\n"
                        "/clear             - Clear chat history\n"
                        "/quit              - Exit\n"
                        "\n"
@@ -734,6 +737,47 @@ static bool handle_slash_command(const char *input, Modal *modal,
     modal_open_message(modal, "Lorebook cleared", false);
     return true;
   }
+  if (strcmp(input, "/tokenizer") == 0) {
+    char msg[1024];
+    int pos = 0;
+    pos += snprintf(msg + pos, sizeof(msg) - pos,
+                    "Current: %s\n\nAvailable tokenizers:\n",
+                    tokenizer_selection_name(tokenizer->selection));
+    for (int i = 0; i < TOKENIZER_COUNT; i++) {
+      pos += snprintf(msg + pos, sizeof(msg) - pos, "  %s - %s\n",
+                      tokenizer_selection_name(i),
+                      tokenizer_selection_description(i));
+    }
+    pos += snprintf(msg + pos, sizeof(msg) - pos,
+                    "\nUse /tokenizer <name> to select");
+    modal_open_message(modal, msg, false);
+    return true;
+  }
+  if (strncmp(input, "/tokenizer ", 11) == 0) {
+    const char *name = input + 11;
+    while (*name == ' ')
+      name++;
+    TokenizerSelection sel = tokenizer_selection_from_name(name);
+    if (chat_tokenizer_set(tokenizer, sel)) {
+      char msg[256];
+      snprintf(msg, sizeof(msg), "Tokenizer set to: %s\n%s",
+               tokenizer_selection_name(sel),
+               tokenizer_selection_description(sel));
+      modal_open_message(modal, msg, false);
+    } else {
+      char msg[256];
+      snprintf(msg, sizeof(msg),
+               "Failed to load tokenizer '%s'\n"
+               "Check tokenizers/ directory exists",
+               name);
+      modal_open_message(modal, msg, false);
+    }
+    return true;
+  }
+  if (strcmp(input, "/tokenize") == 0) {
+    modal_open_tokenize(modal, tokenizer);
+    return true;
+  }
   return false;
 }
 
@@ -760,6 +804,9 @@ int main(void) {
 
   Lorebook lorebook;
   lorebook_init(&lorebook);
+
+  ChatTokenizer tokenizer;
+  chat_tokenizer_init(&tokenizer);
 
   llm_init();
 
@@ -1397,7 +1444,8 @@ int main(void) {
                                   .persona = &persona,
                                   .samplers = &current_samplers,
                                   .author_note = &author_note,
-                                  .lorebook = &lorebook};
+                                  .lorebook = &lorebook,
+                                  .tokenizer = &tokenizer};
 
             history_add_swipe(&history, selected_msg, "Bot: *thinking*");
             ui_draw_chat(chat_win, &history, selected_msg,
@@ -1676,7 +1724,7 @@ int main(void) {
         if (handle_slash_command(input_buffer, &modal, &models, &history,
                                  current_chat_id, current_char_path, &character,
                                  &persona, &character_loaded, &author_note,
-                                 &lorebook)) {
+                                 &lorebook, &tokenizer)) {
           input_buffer[0] = '\0';
           input_len = 0;
           cursor_pos = 0;
@@ -1743,7 +1791,8 @@ int main(void) {
                             .persona = &persona,
                             .samplers = &current_samplers,
                             .author_note = &author_note,
-                            .lorebook = &lorebook};
+                            .lorebook = &lorebook,
+                            .tokenizer = &tokenizer};
       do_llm_reply(&history, chat_win, input_win, saved_input, &models,
                    &selected_msg, &llm_ctx, user_disp, bot_disp);
 
@@ -1892,6 +1941,7 @@ int main(void) {
   endwin();
   history_free(&history);
   lorebook_free(&lorebook);
+  chat_tokenizer_free(&tokenizer);
   if (character_loaded) {
     character_free(&character);
   }

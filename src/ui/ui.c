@@ -66,6 +66,9 @@ void ui_init_colors(void) {
   init_pair(COLOR_PAIR_MODAL_BG, COLOR_WHITE, COLOR_BLACK);
   init_pair(COLOR_PAIR_SYSTEM, COLOR_YELLOW, -1);
   init_pair(COLOR_PAIR_SYSTEM_SEL, COLOR_YELLOW, SEL_BG);
+  init_pair(COLOR_PAIR_TOKEN1, COLOR_CYAN, -1);
+  init_pair(COLOR_PAIR_TOKEN2, COLOR_MAGENTA, -1);
+  init_pair(COLOR_PAIR_TOKEN3, COLOR_YELLOW, -1);
   g_ui_colors = true;
 }
 

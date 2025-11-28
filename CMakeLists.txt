@@ -42,6 +42,7 @@ set(SOURCES
     src/tokenizer/tiktoken.c
     src/tokenizer/sentencepiece.c
     src/tokenizer/gpt2bpe.c
+    src/tokenizer/selector.c
     src/tokenizer/simd.c
     src/tokenizer/unicode_tables.c
 )
@@ -77,6 +78,9 @@ set(TEST_SOURCES
     src/tokenizer/tiktoken.c
     src/tokenizer/simd.c
     src/tokenizer/unicode_tables.c
+    src/tokenizer/selector.c
+    src/tokenizer/gpt2bpe.c
+    src/tokenizer/sentencepiece.c
     src/ui/modal.c
     src/ui/ui.c
     src/ui/markdown.c
@@ -118,6 +122,7 @@ set(INTEGRATION_TEST_SOURCES
     src/tokenizer/sentencepiece.c
     src/tokenizer/simd.c
     src/tokenizer/unicode_tables.c
+    src/tokenizer/selector.c
     src/ui/modal.c
     src/ui/ui.c
     src/ui/markdown.c
@@ -148,6 +153,7 @@ set(ALL_TEST_SOURCES
     tests/test_struct_sizes.c
     tests/test_robustness.c
     tests/test_lorebook.c
+    tests/test_tokenizer_selector.c
     tests/boundary/test_boundary.c
     tests/stress/test_stress.c
     tests/generated/test_unicode_gen.c
@@ -176,6 +182,7 @@ set(ALL_TEST_SOURCES
     src/tokenizer/tiktoken.c
     src/tokenizer/gpt2bpe.c
     src/tokenizer/sentencepiece.c
+    src/tokenizer/selector.c
     src/tokenizer/simd.c
     src/tokenizer/unicode_tables.c
     src/ui/modal.c

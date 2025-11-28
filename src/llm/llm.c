@@ -233,6 +233,10 @@ LLMResponse llm_chat(const ModelConfig *config, const ChatHistory *history,
     return resp;
   }
 
+  if (context && context->tokenizer) {
+    set_current_tokenizer(context->tokenizer);
+  }
+
   const LLMBackend *backend = backend_get(config->api_type);
 
   CURL *curl = curl_easy_init();

@@ -25,7 +25,8 @@ typedef enum {
   MODAL_MESSAGE_EDIT,
   MODAL_MESSAGE_DELETE_CONFIRM,
   MODAL_SAMPLER_SETTINGS,
-  MODAL_SAMPLER_YAML
+  MODAL_SAMPLER_YAML,
+  MODAL_TOKENIZE
 } ModalType;
 
 typedef struct {
@@ -104,6 +105,18 @@ typedef struct {
   char sampler_yaml_buffer[4096];
   int sampler_yaml_cursor;
   int sampler_yaml_scroll;
+
+  char tokenize_buffer[4096];
+  int tokenize_cursor;
+  int tokenize_len;
+  int tokenize_scroll;
+  int tokenize_count;
+  void *tokenizer_ctx;
+  uint32_t *tokenize_ids;
+  size_t *tokenize_offsets;
+  size_t tokenize_ids_count;
+  size_t tokenize_ids_cap;
+  int tokenize_ids_scroll;
 } Modal;
 
 typedef enum {
@@ -139,6 +152,7 @@ void modal_open_message_delete(Modal *m, int msg_index);
 void modal_open_sampler_settings(Modal *m, ApiType api_type);
 void modal_open_sampler_yaml(Modal *m, SamplerSettings *sampler,
                              ApiType api_type);
+void modal_open_tokenize(Modal *m, void *tokenizer_ctx);
 int modal_get_edit_msg_index(const Modal *m);
 const char *modal_get_edit_content(const Modal *m);
 void modal_close(Modal *m);

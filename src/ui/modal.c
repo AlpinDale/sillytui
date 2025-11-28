@@ -1,5 +1,6 @@
 #include "ui/modal.h"
 #include "llm/backends/backend.h"
+#include "tokenizer/selector.h"
 #include "ui/ui.h"
 #include <ctype.h>
 #include <curl/curl.h>
@@ -522,6 +523,23 @@ void modal_open_sampler_yaml(Modal *m, SamplerSettings *sampler,
   create_window(m, 20, 60);
 }
 
+void modal_open_tokenize(Modal *m, void *tokenizer_ctx) {
+  modal_close(m);
+  m->type = MODAL_TOKENIZE;
+  m->tokenize_buffer[0] = '\0';
+  m->tokenize_cursor = 0;
+  m->tokenize_len = 0;
+  m->tokenize_scroll = 0;
+  m->tokenize_count = 0;
+  m->tokenizer_ctx = tokenizer_ctx;
+  m->tokenize_ids = NULL;
+  m->tokenize_offsets = NULL;
+  m->tokenize_ids_count = 0;
+  m->tokenize_ids_cap = 0;
+  m->tokenize_ids_scroll = 0;
+  create_window(m, 22, 70);
+}
+
 int modal_get_edit_msg_index(const Modal *m) { return m->edit_msg_index; }
 
 const char *modal_get_edit_content(const Modal *m) { return m->edit_buffer; }
@@ -533,6 +551,14 @@ void modal_close(Modal *m) {
   }
   if (m->type == MODAL_CHAT_LIST) {
     chat_list_free(&m->chat_list);
+  }
+  if (m->type == MODAL_TOKENIZE) {
+    free(m->tokenize_ids);
+    free(m->tokenize_offsets);
+    m->tokenize_ids = NULL;
+    m->tokenize_offsets = NULL;
+    m->tokenize_ids_count = 0;
+    m->tokenize_ids_cap = 0;
   }
   free_fetched_models(m);
   m->type = MODAL_NONE;
@@ -2181,6 +2207,201 @@ static void draw_sampler_yaml(Modal *m) {
   wrefresh(w);
 }
 
+static int get_token_color(int token_idx) {
+  static const int colors[] = {COLOR_PAIR_TOKEN1, COLOR_PAIR_TOKEN2,
+                               COLOR_PAIR_TOKEN3};
+  return colors[token_idx % 3];
+}
+
+static int find_token_at_pos(Modal *m, int byte_pos) {
+  if (!m->tokenize_offsets || m->tokenize_ids_count == 0)
+    return -1;
+  for (size_t i = 0; i < m->tokenize_ids_count; i++) {
+    if ((size_t)byte_pos >= m->tokenize_offsets[i] &&
+        (size_t)byte_pos < m->tokenize_offsets[i + 1]) {
+      return (int)i;
+    }
+  }
+  return -1;
+}
+
+static void draw_tokenize(Modal *m) {
+  WINDOW *w = m->win;
+  werase(w);
+  draw_box_fancy(w, m->height, m->width);
+  draw_title(w, m->width, "Token Counter");
+
+  ChatTokenizer *tok = m->tokenizer_ctx;
+  const char *tok_name =
+      tok ? tokenizer_selection_name(tok->selection) : "none";
+  wattron(w, COLOR_PAIR(COLOR_PAIR_HINT) | A_DIM);
+  mvwprintw(w, 2, 3, "Tokenizer: %s", tok_name);
+  wattroff(w, COLOR_PAIR(COLOR_PAIR_HINT) | A_DIM);
+
+  int text_area_h = m->height - 12;
+  int text_area_w = m->width - 6;
+
+  wattron(w, COLOR_PAIR(COLOR_PAIR_BORDER));
+  mvwaddstr(w, 3, 2, "╭");
+  for (int x = 3; x < m->width - 3; x++)
+    mvwaddstr(w, 3, x, "─");
+  mvwaddstr(w, 3, m->width - 3, "╮");
+  for (int y = 4; y < 4 + text_area_h; y++) {
+    mvwaddstr(w, y, 2, "│");
+    mvwaddstr(w, y, m->width - 3, "│");
+  }
+  mvwaddstr(w, 4 + text_area_h, 2, "╰");
+  for (int x = 3; x < m->width - 3; x++)
+    mvwaddstr(w, 4 + text_area_h, x, "─");
+  mvwaddstr(w, 4 + text_area_h, m->width - 3, "╯");
+  wattroff(w, COLOR_PAIR(COLOR_PAIR_BORDER));
+
+  int line = 0;
+  int col = 0;
+  int cursor_line = 0;
+
+  for (int i = 0; i < m->tokenize_len; i++) {
+    if (i == m->tokenize_cursor) {
+      cursor_line = line;
+    }
+    if (m->tokenize_buffer[i] == '\n') {
+      line++;
+      col = 0;
+    } else {
+      col++;
+      if (col >= text_area_w) {
+        line++;
+        col = 0;
+      }
+    }
+  }
+  if (m->tokenize_cursor == m->tokenize_len) {
+    cursor_line = line;
+  }
+
+  if (cursor_line < m->tokenize_scroll)
+    m->tokenize_scroll = cursor_line;
+  if (cursor_line >= m->tokenize_scroll + text_area_h)
+    m->tokenize_scroll = cursor_line - text_area_h + 1;
+
+  int draw_line = 0;
+  col = 0;
+  int pos = 0;
+  while (pos < m->tokenize_len && draw_line < m->tokenize_scroll) {
+    if (m->tokenize_buffer[pos] == '\n') {
+      draw_line++;
+      col = 0;
+    } else {
+      col++;
+      if (col >= text_area_w) {
+        draw_line++;
+        col = 0;
+      }
+    }
+    pos++;
+  }
+
+  int y = 4;
+  col = 0;
+  while (pos < m->tokenize_len && y < 4 + text_area_h) {
+    char c = m->tokenize_buffer[pos];
+    int token_idx = find_token_at_pos(m, pos);
+    int color = (token_idx >= 0) ? get_token_color(token_idx) : 0;
+
+    if (pos == m->tokenize_cursor) {
+      wattron(w, A_REVERSE);
+      if (color)
+        wattron(w, COLOR_PAIR(color));
+      if (c == '\n' || col >= text_area_w)
+        mvwaddch(w, y, 3 + col, ' ');
+      else
+        mvwaddch(w, y, 3 + col, c);
+      if (color)
+        wattroff(w, COLOR_PAIR(color));
+      wattroff(w, A_REVERSE);
+    } else if (c != '\n') {
+      if (color)
+        wattron(w, COLOR_PAIR(color));
+      mvwaddch(w, y, 3 + col, c);
+      if (color)
+        wattroff(w, COLOR_PAIR(color));
+    }
+    if (c == '\n') {
+      y++;
+      col = 0;
+    } else {
+      col++;
+      if (col >= text_area_w) {
+        y++;
+        col = 0;
+      }
+    }
+    pos++;
+  }
+
+  if (m->tokenize_cursor == m->tokenize_len && y < 4 + text_area_h) {
+    wattron(w, A_REVERSE);
+    mvwaddch(w, y, 3 + col, ' ');
+    wattroff(w, A_REVERSE);
+  }
+
+  int ids_y = 4 + text_area_h + 1;
+  wattron(w, A_DIM);
+  mvwprintw(w, ids_y, 3, "IDs:");
+  wattroff(w, A_DIM);
+
+  int ids_area_w = m->width - 10;
+  int ids_x = 8;
+  int ids_col = 0;
+  int ids_line = 0;
+  int max_ids_lines = 3;
+
+  size_t start_idx = 0;
+  if (m->tokenize_ids_scroll > 0 &&
+      (size_t)m->tokenize_ids_scroll < m->tokenize_ids_count) {
+    start_idx = m->tokenize_ids_scroll;
+  }
+
+  for (size_t i = start_idx;
+       i < m->tokenize_ids_count && ids_line < max_ids_lines; i++) {
+    char id_str[16];
+    int len = snprintf(id_str, sizeof(id_str), "%u", m->tokenize_ids[i]);
+    if (ids_col + len + 1 > ids_area_w) {
+      ids_line++;
+      ids_col = 0;
+      if (ids_line >= max_ids_lines)
+        break;
+    }
+    int color = get_token_color((int)i);
+    wattron(w, COLOR_PAIR(color));
+    mvwprintw(w, ids_y + ids_line, ids_x + ids_col, "%s", id_str);
+    wattroff(w, COLOR_PAIR(color));
+    ids_col += len + 1;
+  }
+
+  if (m->tokenize_ids_count > 0 &&
+      start_idx + (size_t)(ids_line + 1) * 10 < m->tokenize_ids_count) {
+    wattron(w, A_DIM);
+    mvwprintw(w, ids_y + max_ids_lines - 1, m->width - 6, "...");
+    wattroff(w, A_DIM);
+  }
+
+  mvwhline(w, m->height - 3, 1, ACS_HLINE, m->width - 2);
+  mvwaddch(w, m->height - 3, 0, ACS_LTEE);
+  mvwaddch(w, m->height - 3, m->width - 1, ACS_RTEE);
+
+  wattron(w, A_BOLD | COLOR_PAIR(COLOR_PAIR_USER));
+  mvwprintw(w, m->height - 2, 3, "Tokens: %d", m->tokenize_count);
+  wattroff(w, A_BOLD | COLOR_PAIR(COLOR_PAIR_USER));
+
+  wattron(w, A_DIM);
+  mvwprintw(w, m->height - 2, m->width - 12, "Esc");
+  wattroff(w, A_DIM);
+  mvwprintw(w, m->height - 2, m->width - 8, "close");
+
+  wrefresh(w);
+}
+
 void modal_draw(Modal *m, const ModelsFile *mf) {
   if (!m->win)
     return;
@@ -2230,6 +2451,9 @@ void modal_draw(Modal *m, const ModelsFile *mf) {
     break;
   case MODAL_SAMPLER_YAML:
     draw_sampler_yaml(m);
+    break;
+  case MODAL_TOKENIZE:
+    draw_tokenize(m);
     break;
   default:
     break;
@@ -4287,6 +4511,127 @@ ModalResult modal_handle_key(Modal *m, int ch, ModelsFile *mf,
       return MODAL_RESULT_NONE;
     }
 
+    return MODAL_RESULT_NONE;
+  }
+
+  if (m->type == MODAL_TOKENIZE) {
+    if (ch == 27) {
+      modal_close(m);
+      return MODAL_RESULT_NONE;
+    }
+
+    char *buf = m->tokenize_buffer;
+    int *cursor = &m->tokenize_cursor;
+    int *len = &m->tokenize_len;
+    int max_len = (int)sizeof(m->tokenize_buffer) - 1;
+
+    if (ch == KEY_LEFT) {
+      if (*cursor > 0)
+        (*cursor)--;
+      return MODAL_RESULT_NONE;
+    }
+    if (ch == KEY_RIGHT) {
+      if (*cursor < *len)
+        (*cursor)++;
+      return MODAL_RESULT_NONE;
+    }
+    if (ch == KEY_UP) {
+      int col = 0;
+      int line_start = *cursor;
+      while (line_start > 0 && buf[line_start - 1] != '\n') {
+        line_start--;
+        col++;
+      }
+      if (line_start > 0) {
+        int prev_line_end = line_start - 1;
+        int prev_line_start = prev_line_end;
+        while (prev_line_start > 0 && buf[prev_line_start - 1] != '\n')
+          prev_line_start--;
+        int prev_line_len = prev_line_end - prev_line_start;
+        *cursor = prev_line_start + (col < prev_line_len ? col : prev_line_len);
+      }
+      return MODAL_RESULT_NONE;
+    }
+    if (ch == KEY_DOWN) {
+      int col = 0;
+      int line_start = *cursor;
+      while (line_start > 0 && buf[line_start - 1] != '\n') {
+        line_start--;
+        col++;
+      }
+      int pos = *cursor;
+      while (pos < *len && buf[pos] != '\n')
+        pos++;
+      if (pos < *len) {
+        pos++;
+        int next_col = 0;
+        while (pos < *len && buf[pos] != '\n' && next_col < col) {
+          pos++;
+          next_col++;
+        }
+        *cursor = pos;
+      }
+      return MODAL_RESULT_NONE;
+    }
+
+#define UPDATE_TOKENS()                                                        \
+  do {                                                                         \
+    ChatTokenizer *tok = m->tokenizer_ctx;                                     \
+    if (tok && *len > 0) {                                                     \
+      TokenResult tr = {m->tokenize_ids, m->tokenize_offsets,                  \
+                        m->tokenize_ids_count, m->tokenize_ids_cap};           \
+      int count = chat_tokenizer_encode(tok, buf, &tr);                        \
+      if (count >= 0) {                                                        \
+        m->tokenize_count = count;                                             \
+        m->tokenize_ids = tr.ids;                                              \
+        m->tokenize_offsets = tr.offsets;                                      \
+        m->tokenize_ids_count = tr.count;                                      \
+        m->tokenize_ids_cap = tr.cap;                                          \
+      }                                                                        \
+    } else {                                                                   \
+      m->tokenize_count = 0;                                                   \
+      m->tokenize_ids_count = 0;                                               \
+    }                                                                          \
+  } while (0)
+
+    if (ch == KEY_BACKSPACE || ch == 127 || ch == 8) {
+      if (*cursor > 0) {
+        memmove(&buf[*cursor - 1], &buf[*cursor], *len - *cursor + 1);
+        (*len)--;
+        (*cursor)--;
+        UPDATE_TOKENS();
+      }
+      return MODAL_RESULT_NONE;
+    }
+    if (ch == KEY_DC) {
+      if (*cursor < *len) {
+        memmove(&buf[*cursor], &buf[*cursor + 1], *len - *cursor);
+        (*len)--;
+        UPDATE_TOKENS();
+      }
+      return MODAL_RESULT_NONE;
+    }
+    if (ch == '\n' || ch == '\r') {
+      if (*len < max_len) {
+        memmove(&buf[*cursor + 1], &buf[*cursor], *len - *cursor + 1);
+        buf[*cursor] = '\n';
+        (*len)++;
+        (*cursor)++;
+        UPDATE_TOKENS();
+      }
+      return MODAL_RESULT_NONE;
+    }
+    if (ch >= 32 && ch < 127) {
+      if (*len < max_len) {
+        memmove(&buf[*cursor + 1], &buf[*cursor], *len - *cursor + 1);
+        buf[*cursor] = (char)ch;
+        (*len)++;
+        (*cursor)++;
+        UPDATE_TOKENS();
+      }
+      return MODAL_RESULT_NONE;
+    }
+#undef UPDATE_TOKENS
     return MODAL_RESULT_NONE;
   }
 

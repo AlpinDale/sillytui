@@ -1783,7 +1783,9 @@ TEST(pretokenize_88_if_statement) {
 
 TEST(pretokenize_89_single_cjk) {
   SpanList spans = {0};
-  const char *input = "\xE6" "\x97" "\xA5";
+  const char *input = "\xE6"
+                      "\x97"
+                      "\xA5";
   int result = pretokenize_cl100k(input, &spans);
   ASSERT(result >= 0);
   ASSERT(spans.count >= 1);
@@ -1803,7 +1805,12 @@ TEST(pretokenize_89_single_cjk) {
 
 TEST(pretokenize_90_two_cjk) {
   SpanList spans = {0};
-  const char *input = "\xE6" "\x97" "\xA5" "\xE6" "\x9C" "\xAC";
+  const char *input = "\xE6"
+                      "\x97"
+                      "\xA5"
+                      "\xE6"
+                      "\x9C"
+                      "\xAC";
   int result = pretokenize_cl100k(input, &spans);
   ASSERT(result >= 0);
   ASSERT(spans.count >= 1);
@@ -1823,7 +1830,15 @@ TEST(pretokenize_90_two_cjk) {
 
 TEST(pretokenize_91_three_cjk) {
   SpanList spans = {0};
-  const char *input = "\xE6" "\x97" "\xA5" "\xE6" "\x9C" "\xAC" "\xE8" "\xAA" "\x9E";
+  const char *input = "\xE6"
+                      "\x97"
+                      "\xA5"
+                      "\xE6"
+                      "\x9C"
+                      "\xAC"
+                      "\xE8"
+                      "\xAA"
+                      "\x9E";
   int result = pretokenize_cl100k(input, &spans);
   ASSERT(result >= 0);
   ASSERT(spans.count >= 1);
@@ -1843,7 +1858,21 @@ TEST(pretokenize_91_three_cjk) {
 
 TEST(pretokenize_92_hiragana) {
   SpanList spans = {0};
-  const char *input = "\xE3" "\x81" "\x93" "\xE3" "\x82" "\x93" "\xE3" "\x81" "\xAB" "\xE3" "\x81" "\xA1" "\xE3" "\x81" "\xAF";
+  const char *input = "\xE3"
+                      "\x81"
+                      "\x93"
+                      "\xE3"
+                      "\x82"
+                      "\x93"
+                      "\xE3"
+                      "\x81"
+                      "\xAB"
+                      "\xE3"
+                      "\x81"
+                      "\xA1"
+                      "\xE3"
+                      "\x81"
+                      "\xAF";
   int result = pretokenize_cl100k(input, &spans);
   ASSERT(result >= 0);
   ASSERT(spans.count >= 1);
@@ -1863,7 +1892,18 @@ TEST(pretokenize_92_hiragana) {
 
 TEST(pretokenize_93_katakana) {
   SpanList spans = {0};
-  const char *input = "\xE3" "\x82" "\xAB" "\xE3" "\x82" "\xBF" "\xE3" "\x82" "\xAB" "\xE3" "\x83" "\x8A";
+  const char *input = "\xE3"
+                      "\x82"
+                      "\xAB"
+                      "\xE3"
+                      "\x82"
+                      "\xBF"
+                      "\xE3"
+                      "\x82"
+                      "\xAB"
+                      "\xE3"
+                      "\x83"
+                      "\x8A";
   int result = pretokenize_cl100k(input, &spans);
   ASSERT(result >= 0);
   ASSERT(spans.count >= 1);
@@ -1883,7 +1923,12 @@ TEST(pretokenize_93_katakana) {
 
 TEST(pretokenize_94_hangul) {
   SpanList spans = {0};
-  const char *input = "\xED" "\x95" "\x9C" "\xEA" "\xB8" "\x80";
+  const char *input = "\xED"
+                      "\x95"
+                      "\x9C"
+                      "\xEA"
+                      "\xB8"
+                      "\x80";
   int result = pretokenize_cl100k(input, &spans);
   ASSERT(result >= 0);
   ASSERT(spans.count >= 1);
@@ -1903,7 +1948,18 @@ TEST(pretokenize_94_hangul) {
 
 TEST(pretokenize_95_cyrillic) {
   SpanList spans = {0};
-  const char *input = "\xD0" "\x9F" "\xD1" "\x80" "\xD0" "\xB8" "\xD0" "\xB2" "\xD0" "\xB5" "\xD1" "\x82";
+  const char *input = "\xD0"
+                      "\x9F"
+                      "\xD1"
+                      "\x80"
+                      "\xD0"
+                      "\xB8"
+                      "\xD0"
+                      "\xB2"
+                      "\xD0"
+                      "\xB5"
+                      "\xD1"
+                      "\x82";
   int result = pretokenize_cl100k(input, &spans);
   ASSERT(result >= 0);
   ASSERT(spans.count >= 1);
@@ -1923,7 +1979,16 @@ TEST(pretokenize_95_cyrillic) {
 
 TEST(pretokenize_96_arabic) {
   SpanList spans = {0};
-  const char *input = "\xD9" "\x85" "\xD8" "\xB1" "\xD8" "\xAD" "\xD8" "\xA8" "\xD8" "\xA7";
+  const char *input = "\xD9"
+                      "\x85"
+                      "\xD8"
+                      "\xB1"
+                      "\xD8"
+                      "\xAD"
+                      "\xD8"
+                      "\xA8"
+                      "\xD8"
+                      "\xA7";
   int result = pretokenize_cl100k(input, &spans);
   ASSERT(result >= 0);
   ASSERT(spans.count >= 1);
@@ -1943,7 +2008,14 @@ TEST(pretokenize_96_arabic) {
 
 TEST(pretokenize_97_hebrew) {
   SpanList spans = {0};
-  const char *input = "\xD7" "\xA9" "\xD7" "\x9C" "\xD7" "\x95" "\xD7" "\x9D";
+  const char *input = "\xD7"
+                      "\xA9"
+                      "\xD7"
+                      "\x9C"
+                      "\xD7"
+                      "\x95"
+                      "\xD7"
+                      "\x9D";
   int result = pretokenize_cl100k(input, &spans);
   ASSERT(result >= 0);
   ASSERT(spans.count >= 1);
@@ -1963,7 +2035,12 @@ TEST(pretokenize_97_hebrew) {
 
 TEST(pretokenize_98_mixed_ascii_cjk) {
   SpanList spans = {0};
-  const char *input = "Hello\xE6" "\x97" "\xA5" "\xE6" "\x9C" "\xAC";
+  const char *input = "Hello\xE6"
+                      "\x97"
+                      "\xA5"
+                      "\xE6"
+                      "\x9C"
+                      "\xAC";
   int result = pretokenize_cl100k(input, &spans);
   ASSERT(result >= 0);
   ASSERT(spans.count >= 1);
@@ -1983,7 +2060,12 @@ TEST(pretokenize_98_mixed_ascii_cjk) {
 
 TEST(pretokenize_99_cjk_then_ascii) {
   SpanList spans = {0};
-  const char *input = "\xE6" "\x97" "\xA5" "\xE6" "\x9C" "\xACHello";
+  const char *input = "\xE6"
+                      "\x97"
+                      "\xA5"
+                      "\xE6"
+                      "\x9C"
+                      "\xACHello";
   int result = pretokenize_cl100k(input, &spans);
   ASSERT(result >= 0);
   ASSERT(spans.count >= 1);
@@ -2003,7 +2085,12 @@ TEST(pretokenize_99_cjk_then_ascii) {
 
 TEST(pretokenize_100_ascii_cjk_ascii) {
   SpanList spans = {0};
-  const char *input = "test\xE6" "\x97" "\xA5" "\xE6" "\x9C" "\xACtest";
+  const char *input = "test\xE6"
+                      "\x97"
+                      "\xA5"
+                      "\xE6"
+                      "\x9C"
+                      "\xACtest";
   int result = pretokenize_cl100k(input, &spans);
   ASSERT(result >= 0);
   ASSERT(spans.count >= 1);
@@ -2063,7 +2150,9 @@ TEST(pretokenize_102_letters_with_mixed_whitespace) {
 
 TEST(pretokenize_103_overlong_2_byte) {
   SpanList spans = {0};
-  const char *input = "a\xC0" "\x80" "b";
+  const char *input = "a\xC0"
+                      "\x80"
+                      "b";
   int result = pretokenize_cl100k(input, &spans);
   ASSERT(result >= 0);
   ASSERT(spans.count >= 1);
@@ -2083,7 +2172,8 @@ TEST(pretokenize_103_overlong_2_byte) {
 
 TEST(pretokenize_104_BOM_like_invalid) {
   SpanList spans = {0};
-  const char *input = "\xFF" "\xFE";
+  const char *input = "\xFF"
+                      "\xFE";
   int result = pretokenize_cl100k(input, &spans);
   ASSERT(result >= 0);
   ASSERT(spans.count >= 1);

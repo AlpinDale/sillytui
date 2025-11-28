@@ -8,6 +8,7 @@
 #include "core/config.h"
 #include "llm/sampler.h"
 #include "lore/lorebook.h"
+#include "tokenizer/selector.h"
 #include <stdbool.h>
 #include <stddef.h>
 #include <sys/time.h>
@@ -23,6 +24,7 @@ typedef struct {
   const SamplerSettings *samplers;
   const AuthorNote *author_note;
   const Lorebook *lorebook;
+  ChatTokenizer *tokenizer;
 } LLMContext;
 
 typedef struct {

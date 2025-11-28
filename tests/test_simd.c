@@ -215,18 +215,19 @@ TEST(simd_base64_decode_empty) {
 // =============================================================================
 
 // Helper macro to skip test if SIMD not available
-#define SKIP_IF_NO_SIMD() \
-  do { \
-    if (!simd_available()) { \
-      PASS(); \
-      return; \
-    } \
+#define SKIP_IF_NO_SIMD()                                                      \
+  do {                                                                         \
+    if (!simd_available()) {                                                   \
+      PASS();                                                                  \
+      return;                                                                  \
+    }                                                                          \
   } while (0)
 
 // Test simd_find_non_ascii against fallback
 TEST(compare_find_all_ascii) {
   SKIP_IF_NO_SIMD();
-  const uint8_t data[64] = "Hello World This Is A Test String With More Than 32 Chars!";
+  const uint8_t data[64] =
+      "Hello World This Is A Test String With More Than 32 Chars!";
   ASSERT_EQ_SIZE(simd_find_non_ascii(data, 64),
                  find_non_ascii_fallback(data, 64));
   PASS();
@@ -243,7 +244,8 @@ TEST(compare_find_non_ascii_at_0) {
 TEST(compare_find_non_ascii_at_31) {
   SKIP_IF_NO_SIMD();
   uint8_t data[64];
-  for (int i = 0; i < 64; i++) data[i] = 'A';
+  for (int i = 0; i < 64; i++)
+    data[i] = 'A';
   data[31] = 0xFF;
   ASSERT_EQ_SIZE(simd_find_non_ascii(data, 64),
                  find_non_ascii_fallback(data, 64));
@@ -253,7 +255,8 @@ TEST(compare_find_non_ascii_at_31) {
 TEST(compare_find_non_ascii_at_32) {
   SKIP_IF_NO_SIMD();
   uint8_t data[64];
-  for (int i = 0; i < 64; i++) data[i] = 'A';
+  for (int i = 0; i < 64; i++)
+    data[i] = 'A';
   data[32] = 0xFF;
   ASSERT_EQ_SIZE(simd_find_non_ascii(data, 64),
                  find_non_ascii_fallback(data, 64));
@@ -263,7 +266,8 @@ TEST(compare_find_non_ascii_at_32) {
 TEST(compare_find_non_ascii_at_33) {
   SKIP_IF_NO_SIMD();
   uint8_t data[64];
-  for (int i = 0; i < 64; i++) data[i] = 'A';
+  for (int i = 0; i < 64; i++)
+    data[i] = 'A';
   data[33] = 0xFF;
   ASSERT_EQ_SIZE(simd_find_non_ascii(data, 64),
                  find_non_ascii_fallback(data, 64));
@@ -281,7 +285,8 @@ TEST(compare_is_all_ascii_true_small) {
 TEST(compare_is_all_ascii_true_32) {
   SKIP_IF_NO_SIMD();
   uint8_t data[32];
-  for (int i = 0; i < 32; i++) data[i] = 'A';
+  for (int i = 0; i < 32; i++)
+    data[i] = 'A';
   ASSERT_EQ(simd_is_all_ascii(data, 32), is_all_ascii_fallback(data, 32));
   PASS();
 }
@@ -289,7 +294,8 @@ TEST(compare_is_all_ascii_true_32) {
 TEST(compare_is_all_ascii_false_at_31) {
   SKIP_IF_NO_SIMD();
   uint8_t data[32];
-  for (int i = 0; i < 32; i++) data[i] = 'A';
+  for (int i = 0; i < 32; i++)
+    data[i] = 'A';
   data[31] = 0x80;
   ASSERT_EQ(simd_is_all_ascii(data, 32), is_all_ascii_fallback(data, 32));
   PASS();
@@ -298,7 +304,8 @@ TEST(compare_is_all_ascii_false_at_31) {
 TEST(compare_is_all_ascii_false_at_0) {
   SKIP_IF_NO_SIMD();
   uint8_t data[32];
-  for (int i = 0; i < 32; i++) data[i] = 'A';
+  for (int i = 0; i < 32; i++)
+    data[i] = 'A';
   data[0] = 0x80;
   ASSERT_EQ(simd_is_all_ascii(data, 32), is_all_ascii_fallback(data, 32));
   PASS();
@@ -346,10 +353,15 @@ TEST(compare_count_utf8_mixed_32) {
   uint8_t data[64] = "Hello ";
   // Add Chinese characters
   size_t pos = 6;
-  data[pos++] = 0xE4; data[pos++] = 0xB8; data[pos++] = 0xAD; // 中
-  data[pos++] = 0xE6; data[pos++] = 0x96; data[pos++] = 0x87; // 文
+  data[pos++] = 0xE4;
+  data[pos++] = 0xB8;
+  data[pos++] = 0xAD; // 中
+  data[pos++] = 0xE6;
+  data[pos++] = 0x96;
+  data[pos++] = 0x87; // 文
   // Fill rest with ASCII
-  for (; pos < 64; pos++) data[pos] = 'A';
+  for (; pos < 64; pos++)
+    data[pos] = 'A';
   ASSERT_EQ_SIZE(simd_count_utf8_chars(data, 64),
                  count_utf8_chars_fallback(data, 64));
   PASS();
@@ -403,7 +415,8 @@ TEST(compare_argmin_at_8) {
 TEST(compare_argmin_all_equal) {
   SKIP_IF_NO_SIMD();
   uint32_t data[16];
-  for (int i = 0; i < 16; i++) data[i] = 42;
+  for (int i = 0; i < 16; i++)
+    data[i] = 42;
   uint32_t min_simd, min_fb;
   size_t idx_simd = simd_argmin_u32(data, 16, &min_simd);
   size_t idx_fb = argmin_u32_fallback(data, 16, &min_fb);
@@ -432,9 +445,11 @@ TEST(compare_match_no_letters) {
 TEST(compare_match_stops_at_31) {
   SKIP_IF_NO_SIMD();
   uint8_t data[64];
-  for (int i = 0; i < 31; i++) data[i] = 'A';
+  for (int i = 0; i < 31; i++)
+    data[i] = 'A';
   data[31] = '1';
-  for (int i = 32; i < 64; i++) data[i] = 'B';
+  for (int i = 32; i < 64; i++)
+    data[i] = 'B';
   ASSERT_EQ_SIZE(simd_match_ascii_letters(data, 64),
                  match_ascii_letters_fallback(data, 64));
   PASS();
@@ -443,9 +458,11 @@ TEST(compare_match_stops_at_31) {
 TEST(compare_match_stops_at_32) {
   SKIP_IF_NO_SIMD();
   uint8_t data[64];
-  for (int i = 0; i < 32; i++) data[i] = 'A';
+  for (int i = 0; i < 32; i++)
+    data[i] = 'A';
   data[32] = '1';
-  for (int i = 33; i < 64; i++) data[i] = 'B';
+  for (int i = 33; i < 64; i++)
+    data[i] = 'B';
   ASSERT_EQ_SIZE(simd_match_ascii_letters(data, 64),
                  match_ascii_letters_fallback(data, 64));
   PASS();
@@ -454,9 +471,11 @@ TEST(compare_match_stops_at_32) {
 TEST(compare_match_stops_at_33) {
   SKIP_IF_NO_SIMD();
   uint8_t data[64];
-  for (int i = 0; i < 33; i++) data[i] = 'A';
+  for (int i = 0; i < 33; i++)
+    data[i] = 'A';
   data[33] = '1';
-  for (int i = 34; i < 64; i++) data[i] = 'B';
+  for (int i = 34; i < 64; i++)
+    data[i] = 'B';
   ASSERT_EQ_SIZE(simd_match_ascii_letters(data, 64),
                  match_ascii_letters_fallback(data, 64));
   PASS();
@@ -483,7 +502,7 @@ TEST(compare_base64_empty) {
 
 TEST(compare_base64_small) {
   SKIP_IF_NO_SIMD();
-  const char *input = "SGVsbG8=";  // "Hello"
+  const char *input = "SGVsbG8="; // "Hello"
   uint8_t out1[64], out2[64];
   size_t len1 = simd_base64_decode(input, strlen(input), out1, 64);
   size_t len2 = base64_decode_fallback(input, strlen(input), out2, 64);
@@ -518,7 +537,8 @@ TEST(compare_base64_32_bytes) {
 
 TEST(compare_base64_36_bytes) {
   SKIP_IF_NO_SIMD();
-  // 36 input chars (9 complete blocks = 27 output bytes, just over AVX2 boundary)
+  // 36 input chars (9 complete blocks = 27 output bytes, just over AVX2
+  // boundary)
   const char *input = "VGhpcyBpcyBhIHRlc3Qgc3RyaW5nISE=";
   uint8_t out1[64], out2[64];
   size_t len1 = simd_base64_decode(input, strlen(input), out1, 64);
@@ -531,7 +551,8 @@ TEST(compare_base64_36_bytes) {
 TEST(compare_base64_64_bytes) {
   SKIP_IF_NO_SIMD();
   // 64 input chars (2x AVX2 boundary)
-  const char *input = "VGhlIHF1aWNrIGJyb3duIGZveCBqdW1wcyBvdmVyIHRoZSBsYXp5IGRvZyBhbmQ=";
+  const char *input =
+      "VGhlIHF1aWNrIGJyb3duIGZveCBqdW1wcyBvdmVyIHRoZSBsYXp5IGRvZyBhbmQ=";
   uint8_t out1[128], out2[128];
   size_t len1 = simd_base64_decode(input, 64, out1, 128);
   size_t len2 = base64_decode_fallback(input, 64, out2, 128);
@@ -542,7 +563,7 @@ TEST(compare_base64_64_bytes) {
 
 TEST(compare_base64_with_padding) {
   SKIP_IF_NO_SIMD();
-  const char *input = "YWJjZGU=";  // "abcde"
+  const char *input = "YWJjZGU="; // "abcde"
   uint8_t out1[64], out2[64];
   size_t len1 = simd_base64_decode(input, strlen(input), out1, 64);
   size_t len2 = base64_decode_fallback(input, strlen(input), out2, 64);
@@ -553,7 +574,7 @@ TEST(compare_base64_with_padding) {
 
 TEST(compare_base64_no_padding) {
   SKIP_IF_NO_SIMD();
-  const char *input = "YWJjZGU";  // "abcde" without padding
+  const char *input = "YWJjZGU"; // "abcde" without padding
   uint8_t out1[64], out2[64];
   size_t len1 = simd_base64_decode(input, strlen(input), out1, 64);
   size_t len2 = base64_decode_fallback(input, strlen(input), out2, 64);

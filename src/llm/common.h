@@ -27,6 +27,9 @@ ExampleMessage *parse_mes_example(const char *mes_example, size_t *count,
 void free_example_messages(ExampleMessage *messages, size_t count);
 
 int count_tokens(const ModelConfig *config, const char *text);
+int count_tokens_with_tokenizer(ChatTokenizer *tokenizer,
+                                const ModelConfig *config, const char *text);
+void set_current_tokenizer(ChatTokenizer *tokenizer);
 
 void append_to_response(LLMResponse *resp, const char *data, size_t len);
 void append_to_reasoning(LLMResponse *resp, const char *data, size_t len);
