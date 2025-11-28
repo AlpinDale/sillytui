@@ -7,6 +7,11 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 add_compile_options(-Wall -Wextra -Werror)
 
+# POSIX feature test macros for nftw and other functions (Linux only)
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    add_compile_definitions(_XOPEN_SOURCE=500 _GNU_SOURCE)
+endif()
+
 # Enable AVX2 for x86_64
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
     add_compile_options(-march=x86-64-v3)
