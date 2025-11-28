@@ -236,6 +236,7 @@ static size_t base64_decode_neon(const char *input, size_t input_len,
 #if SIMD_X86_64
 #include <immintrin.h>
 
+__attribute__((target("avx2")))
 static size_t base64_decode_x86_64(const char *input, size_t input_len,
                                   uint8_t *output, size_t output_cap) {
   size_t in_pos = 0;
