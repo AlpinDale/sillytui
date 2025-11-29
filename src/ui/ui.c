@@ -115,21 +115,24 @@ static void draw_title(WINDOW *win, const char *title, int color_pair) {
     wattroff(win, COLOR_PAIR(color_pair) | A_BOLD);
 }
 
-int ui_calc_input_height(const char *buffer, int win_width) {
+int ui_calc_input_height_ex(const char *buffer, int win_width,
+                            const AttachmentList *attachments) {
+  int attach_height = ui_attachment_bar_height(attachments);
+
   if (!buffer || buffer[0] == '\0')
-    return 3;
+    return 3 + attach_height;
 
   int text_width = win_width - 6;
   if (text_width < 10)
     text_width = 10;
 
   int lines = ui_get_input_line_count(buffer, text_width);
-  int height = lines + 2;
+  int height = lines + 2 + attach_height;
 
-  if (height < 3)
-    height = 3;
-  if (height > INPUT_MAX_LINES + 2)
-    height = INPUT_MAX_LINES + 2;
+  if (height < 3 + attach_height)
+    height = 3 + attach_height;
+  if (height > INPUT_MAX_LINES + 2 + attach_height)
+    height = INPUT_MAX_LINES + 2 + attach_height;
 
   return height;
 }
@@ -1019,9 +1022,10 @@ int ui_line_col_to_cursor(const char *buffer, int target_line, int target_col,
   return (int)strlen(buffer);
 }
 
-void ui_draw_input_multiline(WINDOW *input_win, const char *buffer,
-                             int cursor_pos, bool focused, int scroll_line,
-                             bool editing_mode) {
+void ui_draw_input_multiline_ex(WINDOW *input_win, const char *buffer,
+                                int cursor_pos, bool focused, int scroll_line,
+                                bool editing_mode,
+                                const AttachmentList *attachments) {
   werase(input_win);
   draw_rounded_box(input_win, COLOR_PAIR_BORDER, focused);
 
@@ -1031,7 +1035,15 @@ void ui_draw_input_multiline(WINDOW *input_win, const char *buffer,
   int text_width = w - 6;
   if (text_width < 10)
     text_width = 10;
-  int visible_lines = h - 2;
+
+  int attach_height = ui_attachment_bar_height(attachments);
+  int visible_lines = h - 2 - attach_height;
+  if (visible_lines < 1)
+    visible_lines = 1;
+
+  if (attach_height > 0) {
+    ui_draw_attachments(input_win, attachments, 1);
+  }
 
   if (editing_mode) {
     if (g_ui_colors)
@@ -1048,16 +1060,18 @@ void ui_draw_input_multiline(WINDOW *input_win, const char *buffer,
       wattroff(input_win, COLOR_PAIR(COLOR_PAIR_HINT) | A_DIM);
   }
 
+  int input_start_y = 1 + attach_height;
+
   if (focused) {
     if (g_ui_colors)
       wattron(input_win, COLOR_PAIR(COLOR_PAIR_PROMPT) | A_BOLD);
-    mvwaddstr(input_win, 1, 2, "›");
+    mvwaddstr(input_win, input_start_y, 2, "›");
     if (g_ui_colors)
       wattroff(input_win, COLOR_PAIR(COLOR_PAIR_PROMPT) | A_BOLD);
   } else {
     if (g_ui_colors)
       wattron(input_win, COLOR_PAIR(COLOR_PAIR_HINT));
-    mvwaddstr(input_win, 1, 2, "›");
+    mvwaddstr(input_win, input_start_y, 2, "›");
     if (g_ui_colors)
       wattroff(input_win, COLOR_PAIR(COLOR_PAIR_HINT));
   }
@@ -1065,12 +1079,13 @@ void ui_draw_input_multiline(WINDOW *input_win, const char *buffer,
   if (buffer[0] == '\0') {
     if (g_ui_colors) {
       wattron(input_win, COLOR_PAIR(COLOR_PAIR_HINT) | A_DIM);
-      mvwaddstr(input_win, 1, 4, "Type a message or / for commands...");
+      mvwaddstr(input_win, input_start_y, 4,
+                "Type a message or / for commands...");
       wattroff(input_win, COLOR_PAIR(COLOR_PAIR_HINT) | A_DIM);
     }
     if (focused) {
       wattron(input_win, A_REVERSE);
-      mvwaddch(input_win, 1, 4, ' ');
+      mvwaddch(input_win, input_start_y, 4, ' ');
       wattroff(input_win, A_REVERSE);
     }
     wrefresh(input_win);
@@ -1111,7 +1126,7 @@ void ui_draw_input_multiline(WINDOW *input_win, const char *buffer,
 
   col = 0;
   while (*p && screen_line < visible_lines) {
-    int y = 1 + screen_line;
+    int y = input_start_y + screen_line;
     int x = 4 + col;
 
     if (focused && char_idx == cursor_pos) {
@@ -1140,7 +1155,8 @@ void ui_draw_input_multiline(WINDOW *input_win, const char *buffer,
     int cursor_screen_line = cursor_lc.line - scroll_line;
     if (cursor_screen_line >= 0 && cursor_screen_line < visible_lines) {
       wattron(input_win, A_REVERSE);
-      mvwaddch(input_win, 1 + cursor_screen_line, 4 + cursor_lc.col, ' ');
+      mvwaddch(input_win, input_start_y + cursor_screen_line, 4 + cursor_lc.col,
+               ' ');
       wattroff(input_win, A_REVERSE);
     }
   }
@@ -1635,4 +1651,121 @@ void suggestion_box_close(SuggestionBox *sb) {
 
 bool suggestion_box_is_open(const SuggestionBox *sb) {
   return sb->win != NULL && sb->matched_count > 0;
+}
+
+void attachment_list_init(AttachmentList *list) {
+  if (!list)
+    return;
+  list->count = 0;
+  list->selected = -1;
+}
+
+bool attachment_list_add(AttachmentList *list, const char *filename,
+                         size_t file_size) {
+  if (!list || !filename || list->count >= MAX_ATTACHMENTS)
+    return false;
+  strncpy(list->items[list->count].filename, filename,
+          sizeof(list->items[0].filename) - 1);
+  list->items[list->count].filename[sizeof(list->items[0].filename) - 1] = '\0';
+  list->items[list->count].file_size = file_size;
+  list->count++;
+  return true;
+}
+
+void attachment_list_remove(AttachmentList *list, int index) {
+  if (!list || index < 0 || index >= list->count)
+    return;
+  for (int i = index; i < list->count - 1; i++) {
+    list->items[i] = list->items[i + 1];
+  }
+  list->count--;
+  if (list->selected >= list->count)
+    list->selected = list->count - 1;
+}
+
+void attachment_list_clear(AttachmentList *list) {
+  if (!list)
+    return;
+  list->count = 0;
+  list->selected = -1;
+}
+
+static void format_file_size(size_t bytes, char *buf, size_t buf_size) {
+  if (bytes < 1024) {
+    snprintf(buf, buf_size, "%zuB", bytes);
+  } else if (bytes < 1024 * 1024) {
+    snprintf(buf, buf_size, "%.1fKB", bytes / 1024.0);
+  } else {
+    snprintf(buf, buf_size, "%.1fMB", bytes / (1024.0 * 1024.0));
+  }
+}
+
+void ui_draw_attachments(WINDOW *win, const AttachmentList *list, int y) {
+  if (!win || !list || list->count == 0)
+    return;
+
+  int max_x = getmaxx(win);
+
+  for (int i = 0; i < list->count; i++) {
+    int draw_y = y + i;
+    bool is_selected = (i == list->selected);
+
+    wmove(win, draw_y, 0);
+    wclrtoeol(win);
+
+    if (is_selected)
+      wattron(win, A_REVERSE);
+
+    wattron(win, COLOR_PAIR(COLOR_PAIR_BORDER));
+    mvwaddstr(win, draw_y, 1, "📎 ");
+    wattroff(win, COLOR_PAIR(COLOR_PAIR_BORDER));
+
+    char size_str[16];
+    format_file_size(list->items[i].file_size, size_str, sizeof(size_str));
+
+    int name_max = max_x - 20;
+    if (name_max < 10)
+      name_max = 10;
+
+    char display_name[128];
+    const char *fname = list->items[i].filename;
+    if ((int)strlen(fname) > name_max) {
+      snprintf(display_name, sizeof(display_name), "%.*s...", name_max - 3,
+               fname);
+    } else {
+      strncpy(display_name, fname, sizeof(display_name) - 1);
+      display_name[sizeof(display_name) - 1] = '\0';
+    }
+
+    wattron(win, COLOR_PAIR(COLOR_PAIR_USER));
+    wprintw(win, "%s", display_name);
+    wattroff(win, COLOR_PAIR(COLOR_PAIR_USER));
+
+    wattron(win, COLOR_PAIR(COLOR_PAIR_HINT) | A_DIM);
+    wprintw(win, " (%s)", size_str);
+    wattroff(win, COLOR_PAIR(COLOR_PAIR_HINT) | A_DIM);
+
+    int cur_x = getcurx(win);
+    if (cur_x < max_x - 4) {
+      wmove(win, draw_y, max_x - 3);
+      if (is_selected) {
+        wattron(win, COLOR_PAIR(COLOR_PAIR_BOT) | A_BOLD);
+        waddstr(win, "×");
+        wattroff(win, COLOR_PAIR(COLOR_PAIR_BOT) | A_BOLD);
+      } else {
+        wattron(win, A_DIM);
+        waddstr(win, "×");
+        wattroff(win, A_DIM);
+      }
+    }
+
+    if (is_selected)
+      wattroff(win, A_REVERSE);
+  }
+}
+
+int ui_attachment_bar_height(const AttachmentList *list) {
+  if (!list || list->count == 0)
+    return 0;
+  return list->count;
 }
