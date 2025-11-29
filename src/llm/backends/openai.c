@@ -244,7 +244,8 @@ static char *openai_build_request(const ModelConfig *config,
     }
 
     char *expanded = expand_attachments(content);
-    char *substituted = macro_substitute(expanded ? expanded : content, char_name, user_name);
+    char *substituted =
+        macro_substitute(expanded ? expanded : content, char_name, user_name);
     if (expanded)
       free(expanded);
     char *escaped = escape_json_string(substituted ? substituted : content);

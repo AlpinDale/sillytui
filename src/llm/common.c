@@ -1,5 +1,6 @@
 #include "common.h"
 #include "core/macros.h"
+#include "tokenizer/selector.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -391,16 +392,33 @@ char *build_system_prompt(const LLMContext *context) {
   return sb.data;
 }
 
-int count_tokens(const ModelConfig *config, const char *text) {
-  if (!config || !text)
+static ChatTokenizer *g_current_tokenizer = NULL;
+
+void set_current_tokenizer(ChatTokenizer *tokenizer) {
+  g_current_tokenizer = tokenizer;
+}
+
+int count_tokens_with_tokenizer(ChatTokenizer *tokenizer,
+                                const ModelConfig *config, const char *text) {
+  if (!text)
     return -1;
+  if (tokenizer && !chat_tokenizer_is_api(tokenizer) && tokenizer->loaded) {
+    int result = chat_tokenizer_count(tokenizer, text);
+    if (result >= 0)
+      return result;
+  }
+  if (!config)
+    return (int)(strlen(text) / 4);
   extern int llm_tokenize(const ModelConfig *config, const char *text);
   int result = llm_tokenize(config, text);
   if (result < 0) {
-    size_t len = strlen(text);
-    return (int)(len / 4);
+    return (int)(strlen(text) / 4);
   }
   return result;
+}
+
+int count_tokens(const ModelConfig *config, const char *text) {
+  return count_tokens_with_tokenizer(g_current_tokenizer, config, text);
 }
 
 static char *load_attachment_content(const char *ref) {
@@ -484,7 +502,8 @@ char *expand_attachments(const char *content) {
   memcpy(expanded, content, before_len);
   memcpy(expanded + before_len, attachment_content, attachment_content_len);
   if (after_len > 0) {
-    memcpy(expanded + before_len + attachment_content_len, attachment_end + 1, after_len);
+    memcpy(expanded + before_len + attachment_content_len, attachment_end + 1,
+           after_len);
   }
   expanded[total_len - 1] = '\0';
 

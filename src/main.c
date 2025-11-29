@@ -21,6 +21,7 @@
 #include "llm/llm.h"
 #include "llm/sampler.h"
 #include "lore/lorebook.h"
+#include "tokenizer/selector.h"
 #include "ui/markdown.h"
 #include "ui/modal.h"
 #include "ui/ui.h"
@@ -49,12 +50,12 @@ static bool ensure_attachments_dir(void) {
 static long long get_time_ms(void);
 
 static char *read_all_paste_input(WINDOW *win, int first_ch, size_t *out_len,
-                                   WINDOW *input_win, const char *current_buffer,
-                                   int cursor_pos, int input_scroll_line) {
+                                  WINDOW *input_win, const char *current_buffer,
+                                  int cursor_pos, int input_scroll_line) {
   (void)current_buffer;
   (void)cursor_pos;
   (void)input_scroll_line;
-  
+
   size_t cap = 4096;
   size_t len = 0;
   char *buf = malloc(cap);
@@ -62,7 +63,7 @@ static char *read_all_paste_input(WINDOW *win, int first_ch, size_t *out_len,
     return NULL;
 
   nodelay(win, TRUE);
-  
+
   if (isprint(first_ch) || first_ch == '\n') {
     if (len >= cap) {
       cap *= 2;
@@ -80,9 +81,10 @@ static char *read_all_paste_input(WINDOW *win, int first_ch, size_t *out_len,
   int consecutive_empty = 0;
   int update_counter = 0;
   long long last_update = get_time_ms();
-  static const char *paste_frames[] = {"Pasting", "Pasting.", "Pasting..", "Pasting..."};
+  static const char *paste_frames[] = {"Pasting", "Pasting.", "Pasting..",
+                                       "Pasting..."};
   int frame_idx = 0;
-  
+
   while (consecutive_empty < 5) {
     if (ch != ERR) {
       consecutive_empty = 0;
@@ -99,19 +101,19 @@ static char *read_all_paste_input(WINDOW *win, int first_ch, size_t *out_len,
         buf[len++] = (char)ch;
       }
       ch = wgetch(win);
-      
+
       update_counter++;
       long long now = get_time_ms();
       if (input_win && (update_counter % 50 == 0 || now - last_update > 150)) {
         last_update = now;
         frame_idx = (frame_idx + 1) % 4;
-        
+
         if (has_colors())
           wattron(input_win, COLOR_PAIR(COLOR_PAIR_LOADING) | A_BOLD);
         mvwaddstr(input_win, 0, 2, paste_frames[frame_idx]);
         if (has_colors())
           wattroff(input_win, COLOR_PAIR(COLOR_PAIR_LOADING) | A_BOLD);
-        
+
         wrefresh(input_win);
       }
     } else {
@@ -124,7 +126,8 @@ static char *read_all_paste_input(WINDOW *win, int first_ch, size_t *out_len,
   }
 
   flushinp();
-  while (wgetch(win) != ERR) { }
+  while (wgetch(win) != ERR) {
+  }
   nodelay(win, FALSE);
 
   if (len == 0) {
@@ -482,6 +485,8 @@ static const SlashCommand SLASH_COMMANDS[] = {
     {"lore list", "List lorebook entries"},
     {"lore toggle", "Toggle lorebook entry"},
     {"lore clear", "Unload lorebook"},
+    {"tokenizer", "Select tokenizer (local or API)"},
+    {"tokenize", "Open token counter"},
     {"help", "Show available commands"},
     {"clear", "Clear chat history"},
     {"quit", "Exit the application"},
@@ -493,7 +498,7 @@ static bool handle_slash_command(const char *input, Modal *modal,
                                  char *current_chat_id, char *current_char_path,
                                  CharacterCard *character, Persona *persona,
                                  bool *char_loaded, AuthorNote *author_note,
-                                 Lorebook *lorebook) {
+                                 Lorebook *lorebook, ChatTokenizer *tokenizer) {
   if (strcmp(input, "/model set") == 0) {
     modal_open_model_set(modal);
     return true;
@@ -740,6 +745,8 @@ static bool handle_slash_command(const char *input, Modal *modal,
                        "/lore info         - Lorebook info\n"
                        "/lore list         - List entries\n"
                        "/lore toggle <id>  - Toggle entry\n"
+                       "/tokenizer <name>  - Set tokenizer\n"
+                       "/tokenize          - Token counter\n"
                        "/clear             - Clear chat history\n"
                        "/quit              - Exit\n"
                        "\n"
@@ -931,6 +938,47 @@ static bool handle_slash_command(const char *input, Modal *modal,
     modal_open_message(modal, "Lorebook cleared", false);
     return true;
   }
+  if (strcmp(input, "/tokenizer") == 0) {
+    char msg[1024];
+    int pos = 0;
+    pos += snprintf(msg + pos, sizeof(msg) - pos,
+                    "Current: %s\n\nAvailable tokenizers:\n",
+                    tokenizer_selection_name(tokenizer->selection));
+    for (int i = 0; i < TOKENIZER_COUNT; i++) {
+      pos += snprintf(msg + pos, sizeof(msg) - pos, "  %s - %s\n",
+                      tokenizer_selection_name(i),
+                      tokenizer_selection_description(i));
+    }
+    pos += snprintf(msg + pos, sizeof(msg) - pos,
+                    "\nUse /tokenizer <name> to select");
+    modal_open_message(modal, msg, false);
+    return true;
+  }
+  if (strncmp(input, "/tokenizer ", 11) == 0) {
+    const char *name = input + 11;
+    while (*name == ' ')
+      name++;
+    TokenizerSelection sel = tokenizer_selection_from_name(name);
+    if (chat_tokenizer_set(tokenizer, sel)) {
+      char msg[256];
+      snprintf(msg, sizeof(msg), "Tokenizer set to: %s\n%s",
+               tokenizer_selection_name(sel),
+               tokenizer_selection_description(sel));
+      modal_open_message(modal, msg, false);
+    } else {
+      char msg[256];
+      snprintf(msg, sizeof(msg),
+               "Failed to load tokenizer '%s'\n"
+               "Check tokenizers/ directory exists",
+               name);
+      modal_open_message(modal, msg, false);
+    }
+    return true;
+  }
+  if (strcmp(input, "/tokenize") == 0) {
+    modal_open_tokenize(modal, tokenizer);
+    return true;
+  }
   return false;
 }
 
@@ -957,6 +1005,9 @@ int main(void) {
 
   Lorebook lorebook;
   lorebook_init(&lorebook);
+
+  ChatTokenizer tokenizer;
+  chat_tokenizer_init(&tokenizer);
 
   llm_init();
 
@@ -1596,7 +1647,8 @@ int main(void) {
                                   .persona = &persona,
                                   .samplers = &current_samplers,
                                   .author_note = &author_note,
-                                  .lorebook = &lorebook};
+                                  .lorebook = &lorebook,
+                                  .tokenizer = &tokenizer};
 
             history_add_swipe(&history, selected_msg, "Bot: *thinking*");
             ui_draw_chat(chat_win, &history, selected_msg,
@@ -1840,14 +1892,14 @@ int main(void) {
         nodelay(input_win, TRUE);
         int peek_ch = wgetch(input_win);
         bool has_more_input = (peek_ch != ERR);
-        
+
         if (has_more_input) {
           if (settings.paste_attachment_threshold > 0) {
             size_t paste_len = 0;
-            char *paste_buf = read_all_paste_input(input_win, '\n', &paste_len,
-                                                   input_win, input_buffer,
-                                                   cursor_pos, input_scroll_line);
-            
+            char *paste_buf = read_all_paste_input(
+                input_win, '\n', &paste_len, input_win, input_buffer,
+                cursor_pos, input_scroll_line);
+
             if (paste_buf) {
               if (paste_len >= (size_t)settings.paste_attachment_threshold &&
                   strncmp(input_buffer, "[Attachment: ", 13) != 0) {
@@ -1858,7 +1910,7 @@ int main(void) {
                   memcpy(combined, input_buffer, input_len);
                   memcpy(combined + input_len, paste_buf, paste_len);
                   combined[total_len] = '\0';
-                  
+
                   char *attachment_ref = save_attachment(combined, total_len);
                   if (attachment_ref) {
                     strncpy(input_buffer, attachment_ref, INPUT_MAX - 1);
@@ -1874,18 +1926,18 @@ int main(void) {
                 if (input_len < read_limit) {
                   input_buffer[input_len++] = '\n';
                 }
-                
+
                 size_t copy_len = paste_len;
                 if (input_len + copy_len > (size_t)read_limit) {
                   copy_len = read_limit - input_len;
                 }
-                
+
                 memcpy(input_buffer + input_len, paste_buf, copy_len);
                 input_len += copy_len;
                 cursor_pos = input_len;
                 input_buffer[input_len] = '\0';
               }
-              
+
               free(paste_buf);
             } else {
               if (input_len < INPUT_MAX - 2) {
@@ -1896,30 +1948,33 @@ int main(void) {
             if (input_len < INPUT_MAX - 2) {
               input_buffer[input_len++] = '\n';
             }
-            
+
             int read_limit = INPUT_MAX - 2;
-            
+
             while (peek_ch != ERR && input_len < read_limit) {
               if (isprint(peek_ch) || peek_ch == '\n') {
                 input_buffer[input_len++] = (char)peek_ch;
               }
               peek_ch = wgetch(input_win);
             }
-            
+
             flushinp();
-            while (wgetch(input_win) != ERR) { }
+            while (wgetch(input_win) != ERR) {
+            }
             cursor_pos = input_len;
             input_buffer[input_len] = '\0';
           }
-          
+
           nodelay(input_win, FALSE);
           last_input_len = input_len;
           last_input_time = get_time_ms();
-          
-          int new_height = ui_calc_input_height(input_buffer, getmaxx(input_win));
+
+          int new_height =
+              ui_calc_input_height(input_buffer, getmaxx(input_win));
           if (new_height != current_input_height) {
             current_input_height = new_height;
-            ui_layout_windows_with_input(&chat_win, &input_win, current_input_height);
+            ui_layout_windows_with_input(&chat_win, &input_win,
+                                         current_input_height);
             ui_draw_chat(chat_win, &history, selected_msg,
                          get_model_name(&models), user_disp, bot_disp, false);
           }
@@ -1929,7 +1984,7 @@ int main(void) {
         }
         nodelay(input_win, FALSE);
       }
-      
+
     process_enter:
       suggestion_box_close(&suggestions);
 
@@ -1970,7 +2025,8 @@ int main(void) {
           input_len = (int)strlen(input_buffer);
           cursor_pos = input_len;
           free(attachment_ref);
-          int new_height = ui_calc_input_height(input_buffer, getmaxx(input_win));
+          int new_height =
+              ui_calc_input_height(input_buffer, getmaxx(input_win));
           if (new_height != current_input_height) {
             current_input_height = new_height;
             ui_layout_windows_with_input(&chat_win, &input_win,
@@ -1993,7 +2049,7 @@ int main(void) {
         if (handle_slash_command(input_buffer, &modal, &models, &history,
                                  current_chat_id, current_char_path, &character,
                                  &persona, &character_loaded, &author_note,
-                                 &lorebook)) {
+                                 &lorebook, &tokenizer)) {
           input_buffer[0] = '\0';
           input_len = 0;
           cursor_pos = 0;
@@ -2091,11 +2147,12 @@ int main(void) {
                             .persona = &persona,
                             .samplers = &current_samplers,
                             .author_note = &author_note,
-                            .lorebook = &lorebook};
-      
+                            .lorebook = &lorebook,
+                            .tokenizer = &tokenizer};
+
       do_llm_reply(&history, chat_win, input_win, saved_input, &models,
                    &selected_msg, &llm_ctx, user_disp, bot_disp);
-      
+
       if (attachment_content) {
         free(attachment_content);
         attachment_content = NULL;
@@ -2204,18 +2261,18 @@ int main(void) {
       long long now = get_time_ms();
       int input_growth = input_len - last_input_len;
       bool rapid_input = (now - last_input_time < 200 && input_growth > 3);
-      
+
       nodelay(input_win, TRUE);
       int peek_ch = wgetch(input_win);
       bool has_more = (peek_ch != ERR);
-      
+
       if (has_more) {
         if (settings.paste_attachment_threshold > 0) {
           size_t paste_len = 0;
-          char *paste_buf = read_all_paste_input(input_win, ch, &paste_len,
-                                                 input_win, input_buffer,
-                                                 cursor_pos, input_scroll_line);
-          
+          char *paste_buf =
+              read_all_paste_input(input_win, ch, &paste_len, input_win,
+                                   input_buffer, cursor_pos, input_scroll_line);
+
           if (paste_buf) {
             if (paste_len >= (size_t)settings.paste_attachment_threshold &&
                 strncmp(input_buffer, "[Attachment: ", 13) != 0) {
@@ -2226,7 +2283,7 @@ int main(void) {
                 memcpy(combined, input_buffer, input_len);
                 memcpy(combined + input_len, paste_buf, paste_len);
                 combined[total_len] = '\0';
-                
+
                 char *attachment_ref = save_attachment(combined, total_len);
                 if (attachment_ref) {
                   strncpy(input_buffer, attachment_ref, INPUT_MAX - 1);
@@ -2242,18 +2299,18 @@ int main(void) {
               if (input_len < read_limit) {
                 input_buffer[input_len++] = (char)ch;
               }
-              
+
               size_t copy_len = paste_len;
               if (input_len + copy_len > (size_t)read_limit) {
                 copy_len = read_limit - input_len;
               }
-              
+
               memcpy(input_buffer + input_len, paste_buf, copy_len);
               input_len += copy_len;
               cursor_pos = input_len;
               input_buffer[input_len] = '\0';
             }
-            
+
             free(paste_buf);
           } else {
             if (input_len < INPUT_MAX - 2) {
@@ -2262,32 +2319,34 @@ int main(void) {
           }
         } else {
           int read_limit = INPUT_MAX - 2;
-          
+
           if (input_len < read_limit) {
             input_buffer[input_len++] = (char)ch;
           }
-          
+
           while (peek_ch != ERR && input_len < read_limit) {
             if (isprint(peek_ch) || peek_ch == '\n') {
               input_buffer[input_len++] = (char)peek_ch;
             }
             peek_ch = wgetch(input_win);
           }
-          
+
           flushinp();
-          while (wgetch(input_win) != ERR) { }
+          while (wgetch(input_win) != ERR) {
+          }
           cursor_pos = input_len;
           input_buffer[input_len] = '\0';
         }
-        
+
         nodelay(input_win, FALSE);
         last_input_len = input_len;
         last_input_time = get_time_ms();
-        
+
         int new_height = ui_calc_input_height(input_buffer, getmaxx(input_win));
         if (new_height != current_input_height) {
           current_input_height = new_height;
-          ui_layout_windows_with_input(&chat_win, &input_win, current_input_height);
+          ui_layout_windows_with_input(&chat_win, &input_win,
+                                       current_input_height);
           ui_draw_chat(chat_win, &history, selected_msg,
                        get_model_name(&models), user_disp, bot_disp, false);
         }
@@ -2295,9 +2354,9 @@ int main(void) {
                                 input_focused, input_scroll_line, false);
         continue;
       }
-      
+
       nodelay(input_win, FALSE);
-      
+
       if (input_len < INPUT_MAX - 2) {
         memmove(&input_buffer[cursor_pos + 1], &input_buffer[cursor_pos],
                 input_len - cursor_pos + 1);
@@ -2305,10 +2364,10 @@ int main(void) {
         input_len++;
         cursor_pos++;
       }
-      
+
       last_input_len = input_len;
       last_input_time = now;
-      
+
       if (settings.paste_attachment_threshold > 0 &&
           input_len >= settings.paste_attachment_threshold &&
           strncmp(input_buffer, "[Attachment: ", 13) != 0) {
@@ -2325,7 +2384,7 @@ int main(void) {
           continue;
         }
       }
-      
+
       if (rapid_input) {
         continue;
       }
@@ -2374,6 +2433,7 @@ int main(void) {
   endwin();
   history_free(&history);
   lorebook_free(&lorebook);
+  chat_tokenizer_free(&tokenizer);
   if (character_loaded) {
     character_free(&character);
   }
