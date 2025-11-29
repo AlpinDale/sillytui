@@ -1,6 +1,7 @@
 #include "common.h"
 #include "chat/history.h"
 #include "core/macros.h"
+#include "tokenizer/selector.h"
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -803,4 +804,94 @@ void add_sampler_settings_kobold(RequestBuilder *rb, const SamplerSettings *s) {
                            ",\"%s\":%.4g", cs->name, cs->value);
     }
   }
+}
+
+static char *load_attachment_content(const char *ref) {
+  if (!ref || strncmp(ref, "[Attachment: ", 13) != 0)
+    return NULL;
+
+  const char *filename_start = ref + 13;
+  const char *filename_end = strchr(filename_start, ']');
+  if (!filename_end)
+    return NULL;
+
+  size_t filename_len = filename_end - filename_start;
+  if (filename_len == 0 || filename_len >= 256)
+    return NULL;
+
+  const char *home = getenv("HOME");
+  if (!home)
+    return NULL;
+
+  char filename[256];
+  strncpy(filename, filename_start, filename_len);
+  filename[filename_len] = '\0';
+
+  char filepath[768];
+  snprintf(filepath, sizeof(filepath), "%s/.config/sillytui/attachments/%s",
+           home, filename);
+
+  FILE *f = fopen(filepath, "r");
+  if (!f)
+    return NULL;
+
+  fseek(f, 0, SEEK_END);
+  long len = ftell(f);
+  fseek(f, 0, SEEK_SET);
+
+  if (len <= 0) {
+    fclose(f);
+    return NULL;
+  }
+
+  char *content = malloc(len + 1);
+  if (!content) {
+    fclose(f);
+    return NULL;
+  }
+
+  size_t read_len = fread(content, 1, len, f);
+  fclose(f);
+  content[read_len] = '\0';
+
+  return content;
+}
+
+char *expand_attachments(const char *content) {
+  if (!content)
+    return NULL;
+
+  const char *attachment_start = strstr(content, "[Attachment: ");
+  if (!attachment_start)
+    return NULL;
+
+  const char *attachment_end = strchr(attachment_start, ']');
+  if (!attachment_end)
+    return NULL;
+
+  char *attachment_content = load_attachment_content(attachment_start);
+  if (!attachment_content)
+    return NULL;
+
+  size_t before_len = attachment_start - content;
+  size_t after_len = strlen(attachment_end + 1);
+  size_t attachment_content_len = strlen(attachment_content);
+
+  size_t total_len = before_len + attachment_content_len + after_len + 1;
+  char *expanded = malloc(total_len);
+  if (!expanded) {
+    free(attachment_content);
+    return NULL;
+  }
+
+  memcpy(expanded, content, before_len);
+  memcpy(expanded + before_len, attachment_content, attachment_content_len);
+  if (after_len > 0) {
+    memcpy(expanded + before_len + attachment_content_len, attachment_end + 1,
+           after_len);
+  }
+  expanded[total_len - 1] = '\0';
+
+  free(attachment_content);
+  return expanded;
 }

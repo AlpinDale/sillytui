@@ -6,7 +6,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <sys/time.h>
+#include <time.h>
 #include <unistd.h>
 
 #include "character/character.h"
@@ -24,11 +26,173 @@
 #include "ui/modal.h"
 #include "ui/ui.h"
 
+extern char *expand_attachments(const char *content);
+
 #define INPUT_MAX 8192
 
 static const char *SPINNER_FRAMES[] = {"thinking", "thinking.", "thinking..",
                                        "thinking..."};
 #define SPINNER_FRAME_COUNT 4
+
+static bool ensure_attachments_dir(void) {
+  const char *home = getenv("HOME");
+  if (!home)
+    return false;
+  char dir[512];
+  snprintf(dir, sizeof(dir), "%s/.config/sillytui/attachments", home);
+
+  char tmp[512];
+  snprintf(tmp, sizeof(tmp), "%s/.config/sillytui", home);
+  mkdir(tmp, 0755);
+  snprintf(tmp, sizeof(tmp), "%s/.config/sillytui/attachments", home);
+  mkdir(tmp, 0755);
+  return true;
+}
+
+static long long get_time_ms(void);
+
+static char *read_all_paste_input(WINDOW *win, int first_ch, size_t *out_len,
+                                  WINDOW *input_win, const char *current_buffer,
+                                  int cursor_pos, int input_scroll_line) {
+  (void)current_buffer;
+  (void)cursor_pos;
+  (void)input_scroll_line;
+
+  size_t cap = 4096;
+  size_t len = 0;
+  char *buf = malloc(cap);
+  if (!buf)
+    return NULL;
+
+  nodelay(win, TRUE);
+
+  if (isprint(first_ch) || first_ch == '\n') {
+    if (len >= cap) {
+      cap *= 2;
+      char *tmp = realloc(buf, cap);
+      if (!tmp) {
+        free(buf);
+        return NULL;
+      }
+      buf = tmp;
+    }
+    buf[len++] = (char)first_ch;
+  }
+
+  int ch = wgetch(win);
+  int consecutive_empty = 0;
+  int update_counter = 0;
+  long long last_update = get_time_ms();
+  static const char *paste_frames[] = {"Pasting", "Pasting.", "Pasting..",
+                                       "Pasting..."};
+  int frame_idx = 0;
+
+  while (consecutive_empty < 5) {
+    if (ch != ERR) {
+      consecutive_empty = 0;
+      if (isprint(ch) || ch == '\n') {
+        if (len >= cap) {
+          cap *= 2;
+          char *tmp = realloc(buf, cap);
+          if (!tmp) {
+            free(buf);
+            return NULL;
+          }
+          buf = tmp;
+        }
+        buf[len++] = (char)ch;
+      }
+      ch = wgetch(win);
+
+      update_counter++;
+      long long now = get_time_ms();
+      if (input_win && (update_counter % 50 == 0 || now - last_update > 150)) {
+        last_update = now;
+        frame_idx = (frame_idx + 1) % 4;
+
+        if (has_colors())
+          wattron(input_win, COLOR_PAIR(COLOR_PAIR_LOADING) | A_BOLD);
+        mvwaddstr(input_win, 0, 2, paste_frames[frame_idx]);
+        if (has_colors())
+          wattroff(input_win, COLOR_PAIR(COLOR_PAIR_LOADING) | A_BOLD);
+
+        wrefresh(input_win);
+      }
+    } else {
+      consecutive_empty++;
+      if (consecutive_empty < 5) {
+        usleep(5000);
+        ch = wgetch(win);
+      }
+    }
+  }
+
+  flushinp();
+  while (wgetch(win) != ERR) {
+  }
+  nodelay(win, FALSE);
+
+  if (len == 0) {
+    free(buf);
+    return NULL;
+  }
+
+  buf[len] = '\0';
+  *out_len = len;
+  return buf;
+}
+
+static bool save_attachment_to_list(const char *text, size_t text_len,
+                                    AttachmentList *list) {
+  if (!text || text_len == 0 || !list)
+    return false;
+
+  if (list->count >= MAX_ATTACHMENTS)
+    return false;
+
+  if (!ensure_attachments_dir())
+    return false;
+
+  const char *home = getenv("HOME");
+  if (!home)
+    return false;
+
+  time_t now = time(NULL);
+  static int counter = 0;
+  char filename[256];
+  snprintf(filename, sizeof(filename), "attachment_%ld_%d.txt", (long)now,
+           counter++);
+
+  char filepath[768];
+  snprintf(filepath, sizeof(filepath), "%s/.config/sillytui/attachments/%s",
+           home, filename);
+
+  FILE *f = fopen(filepath, "w");
+  if (!f)
+    return false;
+
+  size_t written = fwrite(text, 1, text_len, f);
+  fclose(f);
+
+  if (written != text_len) {
+    unlink(filepath);
+    return false;
+  }
+
+  return attachment_list_add(list, filename, text_len);
+}
+
+static void delete_attachment_file(const char *filename) {
+  if (!filename)
+    return;
+  const char *home = getenv("HOME");
+  if (!home)
+    return;
+  char filepath[768];
+  snprintf(filepath, sizeof(filepath), "%s/.config/sillytui/attachments/%s",
+           home, filename);
+  unlink(filepath);
+}
 
 typedef struct {
   ChatHistory *history;
@@ -543,7 +707,9 @@ static bool handle_slash_command(const char *input, Modal *modal,
                        "/note <text>       - Set author's note\n"
                        "/note-depth <n>    - Set note depth\n"
                        "/lore load <file>  - Load lorebook\n"
+                       "/lore info         - Lorebook info\n"
                        "/lore list         - List entries\n"
+                       "/lore toggle <id>  - Toggle entry\n"
                        "/tokenizer <name>  - Set tokenizer\n"
                        "/tokenize          - Token counter\n"
                        "/clear             - Clear chat history\n"
@@ -844,6 +1010,10 @@ int main(void) {
   int selected_msg = MSG_SELECT_NONE;
   bool input_focused = true;
   bool move_mode = false;
+  int last_input_len = 0;
+  long long last_input_time = 0;
+  AttachmentList attachments;
+  attachment_list_init(&attachments);
   bool running = true;
   char current_chat_id[CHAT_ID_MAX] = {0};
   char current_char_path[CHAT_CHAR_PATH_MAX] = {0};
@@ -884,8 +1054,8 @@ int main(void) {
   const char *bot_disp = get_bot_display_name(&character, character_loaded);
   ui_draw_chat(chat_win, &history, selected_msg, get_model_name(&models),
                user_disp, bot_disp, false);
-  ui_draw_input_multiline(input_win, input_buffer, cursor_pos, input_focused,
-                          input_scroll_line, false);
+  ui_draw_input_multiline_ex(input_win, input_buffer, cursor_pos, input_focused,
+                             input_scroll_line, false, &attachments);
 
   while (running) {
     user_disp = get_user_display_name(&persona);
@@ -899,8 +1069,9 @@ int main(void) {
       input_focused = true;
       ui_draw_chat(chat_win, &history, selected_msg, get_model_name(&models),
                    user_disp, bot_disp, false);
-      ui_draw_input_multiline(input_win, input_buffer, cursor_pos,
-                              input_focused, input_scroll_line, false);
+      ui_draw_input_multiline_ex(input_win, input_buffer, cursor_pos,
+                                 input_focused, input_scroll_line, false,
+                                 &attachments);
       if (modal_is_open(&modal)) {
         modal_close(&modal);
       }
@@ -1012,8 +1183,9 @@ int main(void) {
         touchwin(input_win);
         ui_draw_chat(chat_win, &history, selected_msg, get_model_name(&models),
                      user_disp, bot_disp, false);
-        ui_draw_input_multiline(input_win, input_buffer, cursor_pos,
-                                input_focused, input_scroll_line, false);
+        ui_draw_input_multiline_ex(input_win, input_buffer, cursor_pos,
+                                   input_focused, input_scroll_line, false,
+                                   &attachments);
       }
       continue;
     }
@@ -1030,8 +1202,8 @@ int main(void) {
           input_buffer[cursor_pos] = '\n';
           input_len++;
           cursor_pos++;
-          int new_height =
-              ui_calc_input_height(input_buffer, getmaxx(input_win));
+          int new_height = ui_calc_input_height_ex(
+              input_buffer, getmaxx(input_win), &attachments);
           if (new_height != current_input_height) {
             current_input_height = new_height;
             ui_layout_windows_with_input(&chat_win, &input_win,
@@ -1040,8 +1212,9 @@ int main(void) {
             ui_draw_chat(chat_win, &history, selected_msg,
                          get_model_name(&models), user_disp, bot_disp, false);
           }
-          ui_draw_input_multiline(input_win, input_buffer, cursor_pos,
-                                  input_focused, input_scroll_line, false);
+          ui_draw_input_multiline_ex(input_win, input_buffer, cursor_pos,
+                                     input_focused, input_scroll_line, false,
+                                     &attachments);
         }
         continue;
       }
@@ -1105,9 +1278,9 @@ int main(void) {
                 ui_draw_chat(chat_win, &history, selected_msg,
                              get_model_name(&models), user_disp, bot_disp,
                              false);
-                ui_draw_input_multiline(input_win, input_buffer, cursor_pos,
-                                        input_focused, input_scroll_line,
-                                        false);
+                ui_draw_input_multiline_ex(input_win, input_buffer, cursor_pos,
+                                           input_focused, input_scroll_line,
+                                           false, &attachments);
                 int input_y = getbegy(input_win);
                 int input_x = getbegx(input_win);
                 suggestion_box_update(&suggestions, input_buffer, input_win,
@@ -1154,9 +1327,9 @@ int main(void) {
                 ui_draw_chat(chat_win, &history, selected_msg,
                              get_model_name(&models), user_disp, bot_disp,
                              false);
-                ui_draw_input_multiline(input_win, input_buffer, cursor_pos,
-                                        input_focused, input_scroll_line,
-                                        false);
+                ui_draw_input_multiline_ex(input_win, input_buffer, cursor_pos,
+                                           input_focused, input_scroll_line,
+                                           false, &attachments);
                 continue;
               }
             } else {
@@ -1174,8 +1347,9 @@ int main(void) {
         touchwin(chat_win);
         ui_draw_chat(chat_win, &history, selected_msg, get_model_name(&models),
                      user_disp, bot_disp, false);
-        ui_draw_input_multiline(input_win, input_buffer, cursor_pos,
-                                input_focused, input_scroll_line, false);
+        ui_draw_input_multiline_ex(input_win, input_buffer, cursor_pos,
+                                   input_focused, input_scroll_line, false,
+                                   &attachments);
         if (ch == '\n' || ch == '\r') {
           goto process_enter;
         }
@@ -1251,8 +1425,24 @@ int main(void) {
                                              cur.col, text_width);
           if (cur.line - 1 < input_scroll_line)
             input_scroll_line = cur.line - 1;
-          ui_draw_input_multiline(input_win, input_buffer, cursor_pos,
-                                  input_focused, input_scroll_line, false);
+          ui_draw_input_multiline_ex(input_win, input_buffer, cursor_pos,
+                                     input_focused, input_scroll_line, false,
+                                     &attachments);
+          continue;
+        }
+      }
+      if (input_focused && attachments.count > 0) {
+        if (attachments.selected < 0) {
+          attachments.selected = attachments.count - 1;
+          ui_draw_input_multiline_ex(input_win, input_buffer, cursor_pos,
+                                     input_focused, input_scroll_line, false,
+                                     &attachments);
+          continue;
+        } else if (attachments.selected > 0) {
+          attachments.selected--;
+          ui_draw_input_multiline_ex(input_win, input_buffer, cursor_pos,
+                                     input_focused, input_scroll_line, false,
+                                     &attachments);
           continue;
         }
       }
@@ -1267,6 +1457,7 @@ int main(void) {
                                    CHAT_ID_MAX, current_char_path, char_name);
         }
       } else if (input_focused) {
+        attachments.selected = -1;
         selected_msg = (int)history.count - 1;
         input_focused = false;
       } else if (selected_msg > 0) {
@@ -1274,8 +1465,9 @@ int main(void) {
       }
       ui_draw_chat(chat_win, &history, selected_msg, get_model_name(&models),
                    user_disp, bot_disp, !input_focused);
-      ui_draw_input_multiline(input_win, input_buffer, cursor_pos,
-                              input_focused, input_scroll_line, false);
+      ui_draw_input_multiline_ex(input_win, input_buffer, cursor_pos,
+                                 input_focused, input_scroll_line, false,
+                                 &attachments);
       continue;
     }
 
@@ -1347,10 +1539,22 @@ int main(void) {
           int visible_lines = getmaxy(input_win) - 2;
           if (cur.line + 1 >= input_scroll_line + visible_lines)
             input_scroll_line = cur.line + 2 - visible_lines;
-          ui_draw_input_multiline(input_win, input_buffer, cursor_pos,
-                                  input_focused, input_scroll_line, false);
+          ui_draw_input_multiline_ex(input_win, input_buffer, cursor_pos,
+                                     input_focused, input_scroll_line, false,
+                                     &attachments);
           continue;
         }
+      }
+      if (input_focused && attachments.count > 0 && attachments.selected >= 0) {
+        if (attachments.selected < attachments.count - 1) {
+          attachments.selected++;
+        } else {
+          attachments.selected = -1;
+        }
+        ui_draw_input_multiline_ex(input_win, input_buffer, cursor_pos,
+                                   input_focused, input_scroll_line, false,
+                                   &attachments);
+        continue;
       }
       if (selected_msg == MSG_SELECT_NONE)
         continue;
@@ -1367,11 +1571,14 @@ int main(void) {
       } else {
         selected_msg = MSG_SELECT_NONE;
         input_focused = true;
+        if (attachments.count > 0)
+          attachments.selected = 0;
       }
       ui_draw_chat(chat_win, &history, selected_msg, get_model_name(&models),
                    user_disp, bot_disp, !input_focused);
-      ui_draw_input_multiline(input_win, input_buffer, cursor_pos,
-                              input_focused, input_scroll_line, false);
+      ui_draw_input_multiline_ex(input_win, input_buffer, cursor_pos,
+                                 input_focused, input_scroll_line, false,
+                                 &attachments);
       continue;
     }
 
@@ -1387,8 +1594,9 @@ int main(void) {
       }
       if (input_focused && cursor_pos > 0) {
         cursor_pos--;
-        ui_draw_input_multiline(input_win, input_buffer, cursor_pos,
-                                input_focused, input_scroll_line, false);
+        ui_draw_input_multiline_ex(input_win, input_buffer, cursor_pos,
+                                   input_focused, input_scroll_line, false,
+                                   &attachments);
       } else if (!input_focused && selected_msg >= 0) {
         const char *msg = history_get(&history, selected_msg);
         if (msg && (strncmp(msg, "Bot:", 4) == 0)) {
@@ -1422,8 +1630,9 @@ int main(void) {
       }
       if (input_focused && cursor_pos < input_len) {
         cursor_pos++;
-        ui_draw_input_multiline(input_win, input_buffer, cursor_pos,
-                                input_focused, input_scroll_line, false);
+        ui_draw_input_multiline_ex(input_win, input_buffer, cursor_pos,
+                                   input_focused, input_scroll_line, false,
+                                   &attachments);
       } else if (!input_focused && selected_msg >= 0) {
         const char *msg = history_get(&history, selected_msg);
         bool is_last_bot = (selected_msg == (int)history.count - 1) && msg &&
@@ -1514,8 +1723,9 @@ int main(void) {
             touchwin(input_win);
             ui_draw_chat(chat_win, &history, MSG_SELECT_NONE,
                          get_model_name(&models), user_disp, bot_disp, false);
-            ui_draw_input_multiline(input_win, input_buffer, cursor_pos,
-                                    input_focused, input_scroll_line, false);
+            ui_draw_input_multiline_ex(input_win, input_buffer, cursor_pos,
+                                       input_focused, input_scroll_line, false,
+                                       &attachments);
 
             const char *char_name =
                 (character_loaded && character.name[0]) ? character.name : NULL;
@@ -1544,15 +1754,17 @@ int main(void) {
 
     if (ch == KEY_HOME || ch == 1) {
       cursor_pos = 0;
-      ui_draw_input_multiline(input_win, input_buffer, cursor_pos,
-                              input_focused, input_scroll_line, false);
+      ui_draw_input_multiline_ex(input_win, input_buffer, cursor_pos,
+                                 input_focused, input_scroll_line, false,
+                                 &attachments);
       continue;
     }
 
     if (ch == KEY_END || ch == 5) {
       cursor_pos = input_len;
-      ui_draw_input_multiline(input_win, input_buffer, cursor_pos,
-                              input_focused, input_scroll_line, false);
+      ui_draw_input_multiline_ex(input_win, input_buffer, cursor_pos,
+                                 input_focused, input_scroll_line, false,
+                                 &attachments);
       continue;
     }
 
@@ -1685,6 +1897,105 @@ int main(void) {
     }
 
     if (ch == '\n' || ch == '\r') {
+      if (input_focused) {
+        nodelay(input_win, TRUE);
+        int peek_ch = wgetch(input_win);
+        bool has_more_input = (peek_ch != ERR);
+
+        if (has_more_input) {
+          if (settings.paste_attachment_threshold > 0) {
+            size_t paste_len = 0;
+            char *paste_buf = read_all_paste_input(
+                input_win, '\n', &paste_len, input_win, input_buffer,
+                cursor_pos, input_scroll_line);
+
+            if (paste_buf) {
+              if (paste_len >= (size_t)settings.paste_attachment_threshold &&
+                  attachments.count < MAX_ATTACHMENTS) {
+                size_t total_len = input_len + paste_len;
+                size_t combined_cap = input_len + paste_len + 1;
+                char *combined = malloc(combined_cap);
+                if (combined) {
+                  memcpy(combined, input_buffer, input_len);
+                  memcpy(combined + input_len, paste_buf, paste_len);
+                  combined[total_len] = '\0';
+
+                  if (save_attachment_to_list(combined, total_len,
+                                              &attachments)) {
+                    input_buffer[0] = '\0';
+                    input_len = 0;
+                    cursor_pos = 0;
+                  }
+                  free(combined);
+                }
+              } else {
+                int read_limit = INPUT_MAX - 2;
+                if (input_len < read_limit) {
+                  input_buffer[input_len++] = '\n';
+                }
+
+                size_t copy_len = paste_len;
+                if (input_len + copy_len > (size_t)read_limit) {
+                  copy_len = read_limit - input_len;
+                }
+
+                memcpy(input_buffer + input_len, paste_buf, copy_len);
+                input_len += copy_len;
+                cursor_pos = input_len;
+                input_buffer[input_len] = '\0';
+              }
+
+              free(paste_buf);
+            } else {
+              if (input_len < INPUT_MAX - 2) {
+                input_buffer[input_len++] = '\n';
+              }
+            }
+          } else {
+            if (input_len < INPUT_MAX - 2) {
+              input_buffer[input_len++] = '\n';
+            }
+
+            int read_limit = INPUT_MAX - 2;
+
+            while (peek_ch != ERR && input_len < read_limit) {
+              if (isprint(peek_ch) || peek_ch == '\n') {
+                input_buffer[input_len++] = (char)peek_ch;
+              }
+              peek_ch = wgetch(input_win);
+            }
+
+            flushinp();
+            while (wgetch(input_win) != ERR) {
+            }
+            cursor_pos = input_len;
+            input_buffer[input_len] = '\0';
+          }
+
+          nodelay(input_win, FALSE);
+          last_input_len = input_len;
+          last_input_time = get_time_ms();
+
+          int new_height = ui_calc_input_height_ex(
+              input_buffer, getmaxx(input_win), &attachments);
+          if (new_height != current_input_height) {
+            current_input_height = new_height;
+            ui_layout_windows_with_input(&chat_win, &input_win,
+                                         current_input_height);
+            touchwin(chat_win);
+            ui_draw_chat(chat_win, &history, selected_msg,
+                         get_model_name(&models), user_disp, bot_disp, false);
+          }
+          touchwin(input_win);
+          ui_draw_input_multiline_ex(input_win, input_buffer, cursor_pos,
+                                     input_focused, input_scroll_line, false,
+                                     &attachments);
+          doupdate();
+          continue;
+        }
+        nodelay(input_win, FALSE);
+      }
+
     process_enter:
       suggestion_box_close(&suggestions);
 
@@ -1699,8 +2010,9 @@ int main(void) {
         input_focused = true;
         ui_draw_chat(chat_win, &history, selected_msg, get_model_name(&models),
                      user_disp, bot_disp, false);
-        ui_draw_input_multiline(input_win, input_buffer, cursor_pos,
-                                input_focused, input_scroll_line, false);
+        ui_draw_input_multiline_ex(input_win, input_buffer, cursor_pos,
+                                   input_focused, input_scroll_line, false,
+                                   &attachments);
         continue;
       }
 
@@ -1708,12 +2020,39 @@ int main(void) {
         input_buffer[0] = '\0';
         input_len = 0;
         cursor_pos = 0;
-        ui_draw_input_multiline(input_win, input_buffer, cursor_pos,
-                                input_focused, input_scroll_line, false);
+        ui_draw_input_multiline_ex(input_win, input_buffer, cursor_pos,
+                                   input_focused, input_scroll_line, false,
+                                   &attachments);
         continue;
       }
 
       input_buffer[input_len] = '\0';
+
+      if (settings.paste_attachment_threshold > 0 &&
+          input_len >= settings.paste_attachment_threshold &&
+          attachments.count < MAX_ATTACHMENTS) {
+        if (save_attachment_to_list(input_buffer, input_len, &attachments)) {
+          input_buffer[0] = '\0';
+          input_len = 0;
+          cursor_pos = 0;
+          int new_height = ui_calc_input_height_ex(
+              input_buffer, getmaxx(input_win), &attachments);
+          if (new_height != current_input_height) {
+            current_input_height = new_height;
+            ui_layout_windows_with_input(&chat_win, &input_win,
+                                         current_input_height);
+            touchwin(chat_win);
+            ui_draw_chat(chat_win, &history, selected_msg,
+                         get_model_name(&models), user_disp, bot_disp, false);
+          }
+          touchwin(input_win);
+          ui_draw_input_multiline_ex(input_win, input_buffer, cursor_pos,
+                                     input_focused, input_scroll_line, false,
+                                     &attachments);
+          doupdate();
+          continue;
+        }
+      }
 
       if (strcmp(input_buffer, "/quit") == 0) {
         running = false;
@@ -1738,42 +2077,78 @@ int main(void) {
           bot_disp = get_bot_display_name(&character, character_loaded);
           if (modal_is_open(&modal)) {
             modal_draw(&modal, &models);
-            ui_draw_input_multiline(input_win, input_buffer, cursor_pos,
-                                    input_focused, input_scroll_line, false);
+            ui_draw_input_multiline_ex(input_win, input_buffer, cursor_pos,
+                                       input_focused, input_scroll_line, false,
+                                       &attachments);
           } else {
             selected_msg = MSG_SELECT_NONE;
             input_focused = true;
             touchwin(chat_win);
             ui_draw_chat(chat_win, &history, selected_msg,
                          get_model_name(&models), user_disp, bot_disp, false);
-            ui_draw_input_multiline(input_win, input_buffer, cursor_pos,
-                                    input_focused, input_scroll_line, false);
+            ui_draw_input_multiline_ex(input_win, input_buffer, cursor_pos,
+                                       input_focused, input_scroll_line, false,
+                                       &attachments);
           }
           continue;
         }
       }
 
-      char user_line[INPUT_MAX + 6];
-      snprintf(user_line, sizeof(user_line), "You: %s", input_buffer);
+      char *display_input = NULL;
 
-      char saved_input[INPUT_MAX];
-      strncpy(saved_input, input_buffer, INPUT_MAX);
+      if (attachments.count > 0) {
+        size_t display_len = strlen(input_buffer) + 1;
+        for (int i = 0; i < attachments.count; i++) {
+          display_len += strlen(attachments.items[i].filename) + 20;
+        }
+        display_input = malloc(display_len);
+        if (display_input) {
+          size_t pos = 0;
+          for (int i = 0; i < attachments.count; i++) {
+            pos += sprintf(display_input + pos, "[Attachment: %s]\n",
+                           attachments.items[i].filename);
+          }
+          if (input_buffer[0])
+            strcpy(display_input + pos, input_buffer);
+          else
+            display_input[pos > 0 ? pos - 1 : 0] = '\0';
+        }
+        attachment_list_clear(&attachments);
+      }
+
+      const char *msg_content = display_input ? display_input : input_buffer;
 
       input_buffer[0] = '\0';
       input_len = 0;
       cursor_pos = 0;
       input_scroll_line = 0;
+
       if (current_input_height != 3) {
         current_input_height = 3;
         ui_layout_windows_with_input(&chat_win, &input_win,
                                      current_input_height);
       }
 
+      size_t msg_len = strlen(msg_content);
+      char *user_line = malloc(msg_len + 6);
+      if (!user_line) {
+        free(display_input);
+        continue;
+      }
+      snprintf(user_line, msg_len + 6, "You: %s", msg_content);
+
       size_t user_msg_idx = history_add(&history, user_line);
+      free(user_line);
+      free(display_input);
       if (user_msg_idx != SIZE_MAX) {
         ModelConfig *model = config_get_active(&models);
         if (model) {
-          int user_tokens = llm_tokenize(model, saved_input);
+          const char *msg_text =
+              history_get_swipe(&history, user_msg_idx, 0) + 5;
+          char *expanded = expand_attachments(msg_text);
+          int user_tokens = llm_tokenize(model, expanded ? expanded : msg_text);
+          if (expanded)
+            free(expanded);
           history_set_token_count(&history, user_msg_idx, 0, user_tokens);
         }
         selected_msg = MSG_SELECT_NONE;
@@ -1781,8 +2156,9 @@ int main(void) {
         ui_draw_chat(chat_win, &history, selected_msg, get_model_name(&models),
                      user_disp, bot_disp, false);
       }
-      ui_draw_input_multiline(input_win, input_buffer, cursor_pos,
-                              input_focused, input_scroll_line, false);
+      ui_draw_input_multiline_ex(input_win, input_buffer, cursor_pos,
+                                 input_focused, input_scroll_line, false,
+                                 &attachments);
 
       ModelConfig *active_model = config_get_active(&models);
       if (active_model)
@@ -1793,8 +2169,9 @@ int main(void) {
                             .author_note = &author_note,
                             .lorebook = &lorebook,
                             .tokenizer = &tokenizer};
-      do_llm_reply(&history, chat_win, input_win, saved_input, &models,
-                   &selected_msg, &llm_ctx, user_disp, bot_disp);
+
+      do_llm_reply(&history, chat_win, input_win, NULL, &models, &selected_msg,
+                   &llm_ctx, user_disp, bot_disp);
 
       const char *char_name =
           (character_loaded && character.name[0]) ? character.name : NULL;
@@ -1813,7 +2190,8 @@ int main(void) {
         input_len--;
         cursor_pos--;
 
-        int new_height = ui_calc_input_height(input_buffer, getmaxx(input_win));
+        int new_height = ui_calc_input_height_ex(
+            input_buffer, getmaxx(input_win), &attachments);
         if (new_height != current_input_height) {
           current_input_height = new_height;
           ui_layout_windows_with_input(&chat_win, &input_win,
@@ -1823,8 +2201,9 @@ int main(void) {
                        get_model_name(&models), user_disp, bot_disp, false);
         }
 
-        ui_draw_input_multiline(input_win, input_buffer, cursor_pos,
-                                input_focused, input_scroll_line, false);
+        ui_draw_input_multiline_ex(input_win, input_buffer, cursor_pos,
+                                   input_focused, input_scroll_line, false,
+                                   &attachments);
 
         int input_y = getbegy(input_win);
         int input_x = getbegx(input_win);
@@ -1842,6 +2221,30 @@ int main(void) {
           ui_draw_chat(chat_win, &history, selected_msg,
                        get_model_name(&models), user_disp, bot_disp, false);
         }
+      } else if (attachments.selected >= 0) {
+        int removed_idx = attachments.selected;
+        delete_attachment_file(attachments.items[removed_idx].filename);
+        attachment_list_remove(&attachments, removed_idx);
+        if (attachments.count == 0) {
+          attachments.selected = -1;
+        } else if (attachments.selected >= attachments.count) {
+          attachments.selected = attachments.count - 1;
+        }
+        int new_height = ui_calc_input_height_ex(
+            input_buffer, getmaxx(input_win), &attachments);
+        if (new_height != current_input_height) {
+          current_input_height = new_height;
+          ui_layout_windows_with_input(&chat_win, &input_win,
+                                       current_input_height);
+          touchwin(chat_win);
+          ui_draw_chat(chat_win, &history, selected_msg,
+                       get_model_name(&models), user_disp, bot_disp, false);
+        }
+        touchwin(input_win);
+        ui_draw_input_multiline_ex(input_win, input_buffer, cursor_pos,
+                                   input_focused, input_scroll_line, false,
+                                   &attachments);
+        doupdate();
       }
       continue;
     }
@@ -1849,12 +2252,39 @@ int main(void) {
     if (ch == KEY_DC) {
       if (!input_focused)
         continue;
+      if (attachments.selected >= 0) {
+        int removed_idx = attachments.selected;
+        delete_attachment_file(attachments.items[removed_idx].filename);
+        attachment_list_remove(&attachments, removed_idx);
+        if (attachments.count == 0) {
+          attachments.selected = -1;
+        } else if (attachments.selected >= attachments.count) {
+          attachments.selected = attachments.count - 1;
+        }
+        int new_height = ui_calc_input_height_ex(
+            input_buffer, getmaxx(input_win), &attachments);
+        if (new_height != current_input_height) {
+          current_input_height = new_height;
+          ui_layout_windows_with_input(&chat_win, &input_win,
+                                       current_input_height);
+          touchwin(chat_win);
+          ui_draw_chat(chat_win, &history, selected_msg,
+                       get_model_name(&models), user_disp, bot_disp, false);
+        }
+        touchwin(input_win);
+        ui_draw_input_multiline_ex(input_win, input_buffer, cursor_pos,
+                                   input_focused, input_scroll_line, false,
+                                   &attachments);
+        doupdate();
+        continue;
+      }
       if (cursor_pos < input_len) {
         memmove(&input_buffer[cursor_pos], &input_buffer[cursor_pos + 1],
                 input_len - cursor_pos);
         input_len--;
 
-        int new_height = ui_calc_input_height(input_buffer, getmaxx(input_win));
+        int new_height = ui_calc_input_height_ex(
+            input_buffer, getmaxx(input_win), &attachments);
         if (new_height != current_input_height) {
           current_input_height = new_height;
           ui_layout_windows_with_input(&chat_win, &input_win,
@@ -1864,8 +2294,9 @@ int main(void) {
                        get_model_name(&models), user_disp, bot_disp, false);
         }
 
-        ui_draw_input_multiline(input_win, input_buffer, cursor_pos,
-                                input_focused, input_scroll_line, false);
+        ui_draw_input_multiline_ex(input_win, input_buffer, cursor_pos,
+                                   input_focused, input_scroll_line, false,
+                                   &attachments);
 
         int input_y = getbegy(input_win);
         int input_x = getbegx(input_win);
@@ -1890,14 +2321,156 @@ int main(void) {
     if (!input_focused)
       continue;
 
-    if (isprint(ch) && input_len < INPUT_MAX - 1) {
-      memmove(&input_buffer[cursor_pos + 1], &input_buffer[cursor_pos],
-              input_len - cursor_pos + 1);
-      input_buffer[cursor_pos] = (char)ch;
-      input_len++;
-      cursor_pos++;
+    if ((isprint(ch) || ch == '\n') && input_len < INPUT_MAX - 1) {
+      if (attachments.selected >= 0)
+        attachments.selected = -1;
 
-      int new_height = ui_calc_input_height(input_buffer, getmaxx(input_win));
+      long long now = get_time_ms();
+      int input_growth = input_len - last_input_len;
+      bool rapid_input = (now - last_input_time < 200 && input_growth > 3);
+
+      nodelay(input_win, TRUE);
+      int peek_ch = wgetch(input_win);
+      bool has_more = (peek_ch != ERR);
+
+      if (has_more) {
+        if (settings.paste_attachment_threshold > 0) {
+          size_t paste_len = 0;
+          char *paste_buf =
+              read_all_paste_input(input_win, ch, &paste_len, input_win,
+                                   input_buffer, cursor_pos, input_scroll_line);
+
+          if (paste_buf) {
+            if (paste_len >= (size_t)settings.paste_attachment_threshold &&
+                attachments.count < MAX_ATTACHMENTS) {
+              size_t total_len = input_len + paste_len;
+              size_t combined_cap = input_len + paste_len + 1;
+              char *combined = malloc(combined_cap);
+              if (combined) {
+                memcpy(combined, input_buffer, input_len);
+                memcpy(combined + input_len, paste_buf, paste_len);
+                combined[total_len] = '\0';
+
+                if (save_attachment_to_list(combined, total_len,
+                                            &attachments)) {
+                  input_buffer[0] = '\0';
+                  input_len = 0;
+                  cursor_pos = 0;
+                }
+                free(combined);
+              }
+            } else {
+              int read_limit = INPUT_MAX - 2;
+              if (input_len < read_limit) {
+                input_buffer[input_len++] = (char)ch;
+              }
+
+              size_t copy_len = paste_len;
+              if (input_len + copy_len > (size_t)read_limit) {
+                copy_len = read_limit - input_len;
+              }
+
+              memcpy(input_buffer + input_len, paste_buf, copy_len);
+              input_len += copy_len;
+              cursor_pos = input_len;
+              input_buffer[input_len] = '\0';
+            }
+
+            free(paste_buf);
+          } else {
+            if (input_len < INPUT_MAX - 2) {
+              input_buffer[input_len++] = (char)ch;
+            }
+          }
+        } else {
+          int read_limit = INPUT_MAX - 2;
+
+          if (input_len < read_limit) {
+            input_buffer[input_len++] = (char)ch;
+          }
+
+          while (peek_ch != ERR && input_len < read_limit) {
+            if (isprint(peek_ch) || peek_ch == '\n') {
+              input_buffer[input_len++] = (char)peek_ch;
+            }
+            peek_ch = wgetch(input_win);
+          }
+
+          flushinp();
+          while (wgetch(input_win) != ERR) {
+          }
+          cursor_pos = input_len;
+          input_buffer[input_len] = '\0';
+        }
+
+        nodelay(input_win, FALSE);
+        last_input_len = input_len;
+        last_input_time = get_time_ms();
+
+        int new_height = ui_calc_input_height_ex(
+            input_buffer, getmaxx(input_win), &attachments);
+        if (new_height != current_input_height) {
+          current_input_height = new_height;
+          ui_layout_windows_with_input(&chat_win, &input_win,
+                                       current_input_height);
+          touchwin(chat_win);
+          ui_draw_chat(chat_win, &history, selected_msg,
+                       get_model_name(&models), user_disp, bot_disp, false);
+        }
+        touchwin(input_win);
+        ui_draw_input_multiline_ex(input_win, input_buffer, cursor_pos,
+                                   input_focused, input_scroll_line, false,
+                                   &attachments);
+        doupdate();
+        continue;
+      }
+
+      nodelay(input_win, FALSE);
+
+      if (input_len < INPUT_MAX - 2) {
+        memmove(&input_buffer[cursor_pos + 1], &input_buffer[cursor_pos],
+                input_len - cursor_pos + 1);
+        input_buffer[cursor_pos] = (char)ch;
+        input_len++;
+        cursor_pos++;
+      }
+
+      last_input_len = input_len;
+      last_input_time = now;
+
+      if (settings.paste_attachment_threshold > 0 &&
+          input_len >= settings.paste_attachment_threshold &&
+          attachments.count < MAX_ATTACHMENTS) {
+        input_buffer[input_len] = '\0';
+        if (save_attachment_to_list(input_buffer, input_len, &attachments)) {
+          input_buffer[0] = '\0';
+          input_len = 0;
+          cursor_pos = 0;
+          int new_height = ui_calc_input_height_ex(
+              input_buffer, getmaxx(input_win), &attachments);
+          if (new_height != current_input_height) {
+            current_input_height = new_height;
+            ui_layout_windows_with_input(&chat_win, &input_win,
+                                         current_input_height);
+            touchwin(chat_win);
+            ui_draw_chat(chat_win, &history, selected_msg,
+                         get_model_name(&models), user_disp, bot_disp, false);
+          }
+          touchwin(input_win);
+          ui_draw_input_multiline_ex(input_win, input_buffer, cursor_pos,
+                                     input_focused, input_scroll_line, false,
+                                     &attachments);
+          doupdate();
+          continue;
+        }
+      }
+
+      if (rapid_input) {
+        continue;
+      }
+
+      int new_height = ui_calc_input_height_ex(input_buffer, getmaxx(input_win),
+                                               &attachments);
       if (new_height != current_input_height) {
         current_input_height = new_height;
         ui_layout_windows_with_input(&chat_win, &input_win,
@@ -1912,8 +2485,9 @@ int main(void) {
                      user_disp, bot_disp, false);
       }
 
-      ui_draw_input_multiline(input_win, input_buffer, cursor_pos,
-                              input_focused, input_scroll_line, false);
+      ui_draw_input_multiline_ex(input_win, input_buffer, cursor_pos,
+                                 input_focused, input_scroll_line, false,
+                                 &attachments);
 
       int input_y = getbegy(input_win);
       int input_x = getbegx(input_win);

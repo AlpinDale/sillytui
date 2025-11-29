@@ -783,6 +783,76 @@ TEST(reasoning_toggle_out_of_bounds) {
   PASS();
 }
 
+TEST(attachment_list_init_test) {
+  AttachmentList list;
+  attachment_list_init(&list);
+  ASSERT_EQ_INT(0, list.count);
+  ASSERT_EQ_INT(-1, list.selected);
+  attachment_list_init(NULL);
+  PASS();
+}
+
+TEST(attachment_list_add_test) {
+  AttachmentList list;
+  attachment_list_init(&list);
+  ASSERT(attachment_list_add(&list, "test.txt", 100));
+  ASSERT_EQ_INT(1, list.count);
+  ASSERT_EQ_STR("test.txt", list.items[0].filename);
+  ASSERT_EQ_INT(100, (int)list.items[0].file_size);
+  ASSERT(attachment_list_add(&list, "test2.txt", 200));
+  ASSERT_EQ_INT(2, list.count);
+  ASSERT(!attachment_list_add(NULL, "test.txt", 100));
+  ASSERT(!attachment_list_add(&list, NULL, 100));
+  PASS();
+}
+
+TEST(attachment_list_remove_test) {
+  AttachmentList list;
+  attachment_list_init(&list);
+  attachment_list_add(&list, "a.txt", 10);
+  attachment_list_add(&list, "b.txt", 20);
+  attachment_list_add(&list, "c.txt", 30);
+  ASSERT_EQ_INT(3, list.count);
+  attachment_list_remove(&list, 1);
+  ASSERT_EQ_INT(2, list.count);
+  ASSERT_EQ_STR("a.txt", list.items[0].filename);
+  ASSERT_EQ_STR("c.txt", list.items[1].filename);
+  attachment_list_remove(&list, 0);
+  ASSERT_EQ_INT(1, list.count);
+  ASSERT_EQ_STR("c.txt", list.items[0].filename);
+  attachment_list_remove(NULL, 0);
+  attachment_list_remove(&list, -1);
+  attachment_list_remove(&list, 100);
+  PASS();
+}
+
+TEST(attachment_list_clear_test) {
+  AttachmentList list;
+  attachment_list_init(&list);
+  attachment_list_add(&list, "a.txt", 10);
+  attachment_list_add(&list, "b.txt", 20);
+  list.selected = 1;
+  attachment_list_clear(&list);
+  ASSERT_EQ_INT(0, list.count);
+  ASSERT_EQ_INT(-1, list.selected);
+  attachment_list_clear(NULL);
+  PASS();
+}
+
+TEST(attachment_list_max_test) {
+  AttachmentList list;
+  attachment_list_init(&list);
+  for (int i = 0; i < MAX_ATTACHMENTS; i++) {
+    char name[32];
+    snprintf(name, sizeof(name), "file%d.txt", i);
+    ASSERT(attachment_list_add(&list, name, i * 100));
+  }
+  ASSERT_EQ_INT(MAX_ATTACHMENTS, list.count);
+  ASSERT(!attachment_list_add(&list, "overflow.txt", 999));
+  ASSERT_EQ_INT(MAX_ATTACHMENTS, list.count);
+  PASS();
+}
+
 void run_robustness_tests(void) {
   TEST_SUITE("Robustness Tests");
   RUN_TEST(robust_history_very_long_message);
@@ -843,4 +913,9 @@ void run_robustness_tests(void) {
   RUN_TEST(reasoning_set_null_clears);
   RUN_TEST(reasoning_toggle_expand);
   RUN_TEST(reasoning_toggle_out_of_bounds);
+  RUN_TEST(attachment_list_init_test);
+  RUN_TEST(attachment_list_add_test);
+  RUN_TEST(attachment_list_remove_test);
+  RUN_TEST(attachment_list_clear_test);
+  RUN_TEST(attachment_list_max_test);
 }

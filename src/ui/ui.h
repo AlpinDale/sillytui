@@ -69,8 +69,23 @@ typedef struct {
   int scroll_offset;
 } InPlaceEdit;
 
+#define MAX_ATTACHMENTS 8
+
+typedef struct {
+  char filename[256];
+  size_t file_size;
+} Attachment;
+
+typedef struct {
+  Attachment items[MAX_ATTACHMENTS];
+  int count;
+  int selected;
+} AttachmentList;
+
 void ui_init_colors(void);
-int ui_calc_input_height(const char *buffer, int win_width);
+int ui_calc_input_height_ex(const char *buffer, int win_width,
+                            const AttachmentList *attachments);
+#define ui_calc_input_height(b, w) ui_calc_input_height_ex(b, w, NULL)
 void ui_layout_windows_with_input(WINDOW **chat_win, WINDOW **input_win,
                                   int input_height);
 
@@ -83,9 +98,12 @@ void ui_draw_chat_ex(WINDOW *chat_win, const ChatHistory *history,
                      bool show_edit_hints, bool move_mode, InPlaceEdit *edit);
 #define ui_draw_chat(w, h, s, m, u, b, e)                                      \
   ui_draw_chat_ex(w, h, s, m, u, b, e, false, NULL)
-void ui_draw_input_multiline(WINDOW *input_win, const char *buffer,
-                             int cursor_pos, bool focused, int scroll_line,
-                             bool editing_mode);
+void ui_draw_input_multiline_ex(WINDOW *input_win, const char *buffer,
+                                int cursor_pos, bool focused, int scroll_line,
+                                bool editing_mode,
+                                const AttachmentList *attachments);
+#define ui_draw_input_multiline(w, b, c, f, s, e)                              \
+  ui_draw_input_multiline_ex(w, b, c, f, s, e, NULL)
 int ui_get_total_lines(WINDOW *chat_win, const ChatHistory *history);
 int ui_get_msg_scroll_offset(WINDOW *chat_win, const ChatHistory *history,
                              int selected_msg, const InPlaceEdit *edit);
@@ -106,5 +124,13 @@ const char *suggestion_box_get_selected(SuggestionBox *sb);
 const char *suggestion_box_get_selected_id(SuggestionBox *sb);
 void suggestion_box_close(SuggestionBox *sb);
 bool suggestion_box_is_open(const SuggestionBox *sb);
+
+void attachment_list_init(AttachmentList *list);
+bool attachment_list_add(AttachmentList *list, const char *filename,
+                         size_t file_size);
+void attachment_list_remove(AttachmentList *list, int index);
+void attachment_list_clear(AttachmentList *list);
+void ui_draw_attachments(WINDOW *win, const AttachmentList *list, int y);
+int ui_attachment_bar_height(const AttachmentList *list);
 
 #endif
