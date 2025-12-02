@@ -119,6 +119,9 @@ set(INTEGRATION_TEST_SOURCES
     tests/integration/test_tokenizer_integration.c
     src/core/config.c
     src/core/macros.c
+    src/core/time.c
+    src/core/error.c
+    src/core/log.c
     src/chat/chat.c
     src/chat/history.c
     src/chat/author_note.c
@@ -134,6 +137,7 @@ set(INTEGRATION_TEST_SOURCES
     src/ui/modal.c
     src/ui/ui.c
     src/ui/markdown.c
+    src/ui/console.c
 )
 
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "arm64|aarch64")

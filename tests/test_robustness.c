@@ -8,6 +8,7 @@
 #include "llm/sampler.h"
 #include "test_framework.h"
 #include "tokenizer/tiktoken.h"
+#include "ui/markdown.h"
 #include "ui/ui.h"
 #include <stdlib.h>
 #include <string.h>
@@ -1037,6 +1038,109 @@ TEST(log_message_format_string) {
   PASS();
 }
 
+// Markdown code block tests
+TEST(markdown_code_block_opening) {
+  markdown_init_colors();
+
+  // Opening code block should set STYLE_CODE_BLOCK
+  unsigned style = markdown_compute_style_after("```python", 9, 0);
+  ASSERT((style & 0x20) != 0); // STYLE_CODE_BLOCK = 1 << 5 = 0x20
+
+  PASS();
+}
+
+TEST(markdown_code_block_closing) {
+  markdown_init_colors();
+
+  // Starting in code block, closing should clear it
+  unsigned initial = 0x20; // STYLE_CODE_BLOCK
+  unsigned style = markdown_compute_style_after("```", 3, initial);
+  ASSERT((style & 0x20) == 0); // Should be cleared
+
+  PASS();
+}
+
+TEST(markdown_code_block_state_propagation) {
+  markdown_init_colors();
+
+  // Open code block
+  unsigned style = markdown_compute_style_after("```python", 9, 0);
+  ASSERT((style & 0x20) != 0);
+
+  // Next line should still be in code block
+  style = markdown_compute_style_after("def hello():", 12, style);
+  ASSERT((style & 0x20) != 0);
+
+  // Close code block
+  style = markdown_compute_style_after("```", 3, style);
+  ASSERT((style & 0x20) == 0);
+
+  // Next line should not be in code block
+  style = markdown_compute_style_after("Normal text", 11, style);
+  ASSERT((style & 0x20) == 0);
+
+  PASS();
+}
+
+TEST(markdown_code_block_multiline) {
+  markdown_init_colors();
+
+  unsigned style = 0;
+
+  // Open
+  style = markdown_compute_style_after("```python", 9, style);
+  ASSERT((style & 0x20) != 0);
+
+  // Line 1
+  style = markdown_compute_style_after("def f():", 9, style);
+  ASSERT((style & 0x20) != 0);
+
+  // Line 2
+  style = markdown_compute_style_after("    return 42", 13, style);
+  ASSERT((style & 0x20) != 0);
+
+  // Close
+  style = markdown_compute_style_after("```", 3, style);
+  ASSERT((style & 0x20) == 0);
+
+  PASS();
+}
+
+TEST(markdown_code_block_inline_code) {
+  markdown_init_colors();
+
+  // Inline code should not affect code block state
+  unsigned style = markdown_compute_style_after("Use `code` here", 15, 0);
+  ASSERT((style & 0x20) == 0); // Not a code block
+  ASSERT((style & 0x10) == 0); // Inline code should be toggled off by end
+
+  // Inline code inside code block
+  style = 0x20; // In code block
+  style = markdown_compute_style_after("print(`hello`)", 14, style);
+  ASSERT((style & 0x20) != 0); // Still in code block
+
+  PASS();
+}
+
+TEST(markdown_code_block_whitespace_preservation) {
+  markdown_init_colors();
+
+  // Test that whitespace is preserved in code blocks
+  // This is tested via the wrap_text function, but we can test style
+  // computation
+  unsigned style = 0x20; // In code block
+
+  // Line with leading spaces
+  style = markdown_compute_style_after("    def f():", 12, style);
+  ASSERT((style & 0x20) != 0); // Still in code block
+
+  // Empty line
+  style = markdown_compute_style_after("", 0, style);
+  ASSERT((style & 0x20) != 0); // Still in code block
+
+  PASS();
+}
+
 void run_robustness_tests(void) {
   TEST_SUITE("Robustness Tests");
   RUN_TEST(robust_history_very_long_message);
@@ -1118,4 +1222,10 @@ void run_robustness_tests(void) {
   RUN_TEST(attachment_list_remove_test);
   RUN_TEST(attachment_list_clear_test);
   RUN_TEST(attachment_list_max_test);
+  RUN_TEST(markdown_code_block_opening);
+  RUN_TEST(markdown_code_block_closing);
+  RUN_TEST(markdown_code_block_state_propagation);
+  RUN_TEST(markdown_code_block_multiline);
+  RUN_TEST(markdown_code_block_inline_code);
+  RUN_TEST(markdown_code_block_whitespace_preservation);
 }

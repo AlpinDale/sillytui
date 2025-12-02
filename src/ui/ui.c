@@ -210,34 +210,63 @@ static int wrap_text(const char *text, int width, WrappedLine *out,
 
   int line_count = 0;
   const char *p = text;
+  bool in_code_block = false;
 
   while (*p && line_count < max_lines) {
-    while (*p == ' ')
-      p++;
-    if (!*p)
-      break;
+    // Track code block state by looking for triple backticks
+    if (p[0] == '`' && p[1] == '`' && p[2] == '`') {
+      in_code_block = !in_code_block;
+      // Don't skip the backticks, they'll be part of the line
+    }
 
+    // In code blocks, preserve leading whitespace
+    // Otherwise, skip leading spaces for normal text wrapping
     const char *line_start = p;
+    if (!in_code_block) {
+      while (*p == ' ')
+        p++;
+      if (!*p)
+        break;
+      line_start = p;
+    } else {
+      // In code block: preserve leading whitespace, but skip if line is empty
+      if (*p == '\n') {
+        p++;
+        continue;
+      }
+    }
+
     const char *last_break = NULL;
     int col = 0;
+    const char *scan = p;
 
-    while (*p && *p != '\n' && col < width) {
-      if (*p == ' ')
-        last_break = p;
-      p++;
+    // Count columns, preserving spaces in code blocks
+    while (*scan && *scan != '\n' && col < width) {
+      if (*scan == ' ') {
+        if (!in_code_block)
+          last_break = scan;
+      }
+      scan++;
       col++;
     }
 
     int line_len;
-    if (!*p || *p == '\n') {
-      line_len = (int)(p - line_start);
-      if (*p == '\n')
-        p++;
-    } else if (last_break && last_break > line_start) {
+    if (!*scan || *scan == '\n') {
+      line_len = (int)(scan - line_start);
+      if (*scan == '\n')
+        scan++;
+      p = scan;
+    } else if (!in_code_block && last_break && last_break > line_start) {
+      // Normal text: break at word boundary
       line_len = (int)(last_break - line_start);
       p = last_break + 1;
+      // Skip spaces after the break
+      while (*p == ' ')
+        p++;
     } else {
-      line_len = col;
+      // Code block or no break found: use full width
+      line_len = (int)(scan - line_start);
+      p = scan;
     }
 
     out[line_count].start = line_start;
