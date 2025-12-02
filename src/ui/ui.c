@@ -2,6 +2,7 @@
 #include "chat/chat.h"
 #include "chat/history.h"
 #include "core/macros.h"
+#include "ui/console.h"
 #include "ui/markdown.h"
 #include <ctype.h>
 #include <stdlib.h>
@@ -1808,4 +1809,120 @@ int ui_attachment_bar_height(const AttachmentList *list) {
   if (!list || list->count == 0)
     return 0;
   return list->count;
+}
+
+void ui_draw_console(WINDOW *console_win, ConsoleState *console) {
+  if (!console_win || !console || !console->visible)
+    return;
+
+  // Clear the needs_redraw flag
+  console->needs_redraw = false;
+
+  int h, w;
+  getmaxyx(console_win, h, w);
+  if (h < 2 || w < 2)
+    return;
+
+  werase(console_win);
+
+  // Draw border
+  draw_rounded_box(console_win, COLOR_PAIR_BORDER, false);
+
+  // Draw title
+  draw_title(console_win, "Console", COLOR_PAIR_TITLE);
+
+  // Draw log entries
+  int y = 1;
+  int max_y = h - 2;
+  if (max_y < 1)
+    max_y = 1;
+
+  // Calculate which entries to show based on scroll offset
+  int start_index = 0;
+  if (console->count > 0) {
+    int max_scroll = (int)console->count - max_y;
+    if (max_scroll < 0)
+      max_scroll = 0;
+    int scroll = console->scroll_offset;
+    if (scroll > max_scroll)
+      scroll = max_scroll;
+    start_index = (int)console->count - max_y - scroll;
+    if (start_index < 0)
+      start_index = 0;
+  }
+
+  for (int i = 0; i < max_y && (start_index + i) < (int)console->count; i++) {
+    size_t idx = (size_t)(start_index + i);
+    // Access entries in ring buffer order (oldest to newest)
+    size_t ring_idx;
+    if (console->count < CONSOLE_MAX_ENTRIES) {
+      // Buffer not full, linear access
+      ring_idx = idx;
+    } else {
+      // Buffer full, use ring buffer indexing
+      ring_idx = (console->head + idx) % CONSOLE_MAX_ENTRIES;
+    }
+    const ConsoleLogEntry *entry = &console->entries[ring_idx];
+
+    // Determine color based on log level
+    int color_pair = COLOR_PAIR_HINT;
+    const char *level_str = "?";
+    switch (entry->level) {
+    case LOG_DEBUG:
+      color_pair = COLOR_PAIR_HINT;
+      level_str = "DBG";
+      break;
+    case LOG_INFO:
+      color_pair = COLOR_PAIR_STATUS;
+      level_str = "INF";
+      break;
+    case LOG_WARNING:
+      color_pair = COLOR_PAIR_TOKEN3; // Yellow
+      level_str = "WRN";
+      break;
+    case LOG_ERROR:
+      color_pair = COLOR_PAIR_USER; // Red/Green - use user color for errors
+      level_str = "ERR";
+      break;
+    }
+
+    if (g_ui_colors)
+      wattron(console_win, COLOR_PAIR(color_pair));
+
+    // Format: [HH:MM:SS.mmm] [LEVEL] file:line message
+    char line[512];
+    int pos =
+        snprintf(line, sizeof(line), "[%s] [%s] %s:%d %s", entry->timestamp,
+                 level_str, entry->file, entry->line, entry->message);
+
+    // Truncate if too long
+    if (pos >= w - 4) {
+      line[w - 7] = '.';
+      line[w - 6] = '.';
+      line[w - 5] = '.';
+      line[w - 4] = '\0';
+    }
+
+    mvwaddstr(console_win, y, 2, line);
+    if (g_ui_colors)
+      wattroff(console_win, COLOR_PAIR(color_pair));
+
+    y++;
+  }
+
+  // Draw scroll indicator if needed
+  if (console->count > (size_t)max_y) {
+    if (g_ui_colors)
+      wattron(console_win, COLOR_PAIR(COLOR_PAIR_HINT));
+    if (console->scroll_offset > 0) {
+      mvwaddstr(console_win, 0, w - 10, "▲");
+    }
+    if (console->scroll_offset < (int)console->count - max_y) {
+      mvwaddstr(console_win, h - 1, w - 10, "▼");
+    }
+    if (g_ui_colors)
+      wattroff(console_win, COLOR_PAIR(COLOR_PAIR_HINT));
+  }
+
+  wrefresh(console_win);
 }

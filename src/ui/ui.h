@@ -2,6 +2,7 @@
 #define UI_H
 
 #include "chat/history.h"
+#include "ui/console.h"
 #include <curses.h>
 
 #define COLOR_PAIR_BORDER 10
@@ -141,5 +142,7 @@ void attachment_list_remove(AttachmentList *list, int index);
 void attachment_list_clear(AttachmentList *list);
 void ui_draw_attachments(WINDOW *win, const AttachmentList *list, int y);
 int ui_attachment_bar_height(const AttachmentList *list);
+
+void ui_draw_console(WINDOW *console_win, ConsoleState *console);
 
 #endif

@@ -17,11 +17,13 @@
 #include "chat/chat.h"
 #include "chat/history.h"
 #include "core/config.h"
+#include "core/log.h"
 #include "core/macros.h"
 #include "llm/llm.h"
 #include "llm/sampler.h"
 #include "lore/lorebook.h"
 #include "tokenizer/selector.h"
+#include "ui/console.h"
 #include "ui/markdown.h"
 #include "ui/modal.h"
 #include "ui/ui.h"
@@ -352,6 +354,8 @@ static void do_llm_reply(ChatHistory *history, WINDOW *chat_win,
   ModelConfig *model = config_get_active(mf);
   const char *model_name = get_model_name(mf);
   if (!model) {
+    log_message(LOG_WARNING, __FILE__, __LINE__,
+                "LLM reply requested but no model configured");
     history_add_with_role(history,
                           "Bot: *looks confused* \"No model configured. Use "
                           "/model set to add one.\"",
@@ -362,6 +366,8 @@ static void do_llm_reply(ChatHistory *history, WINDOW *chat_win,
     return;
   }
 
+  log_message(LOG_INFO, __FILE__, __LINE__, "Starting LLM request to %s",
+              model_name);
   size_t msg_index =
       history_add_with_role(history, "Bot: *thinking*", ROLE_ASSISTANT);
   if (msg_index == SIZE_MAX)
@@ -398,6 +404,8 @@ static void do_llm_reply(ChatHistory *history, WINDOW *chat_win,
                               reasoning_callback, progress_callback, &ctx);
 
   if (!resp.success) {
+    log_message(LOG_ERROR, __FILE__, __LINE__, "LLM request failed: %s",
+                resp.error);
     char err_msg[512];
     snprintf(err_msg, sizeof(err_msg), "Bot: *frowns* \"Error: %s\"",
              resp.error);
@@ -406,8 +414,13 @@ static void do_llm_reply(ChatHistory *history, WINDOW *chat_win,
     ui_draw_chat(chat_win, history, *selected_msg, model_name, user_name,
                  bot_name, false);
   } else if (ctx.buf_len == 0) {
+    log_message(LOG_WARNING, __FILE__, __LINE__,
+                "LLM request succeeded but returned empty response");
     history_update(history, msg_index, "Bot: *stays silent*");
   } else {
+    log_message(LOG_INFO, __FILE__, __LINE__,
+                "LLM request completed: %d tokens, %.1fms, %.1f tok/s",
+                resp.completion_tokens, resp.elapsed_ms, resp.output_tps);
     size_t active_swipe = history_get_active_swipe(history, msg_index);
     history_set_token_count(history, msg_index, active_swipe,
                             resp.completion_tokens);
@@ -472,12 +485,51 @@ static void update_tokenizer_from_model(ChatTokenizer *tokenizer,
   }
 }
 
+// Global console state pointer for log callback
+static ConsoleState *g_console_state = NULL;
+
+static void console_log_callback(LogLevel level, const char *file, int line,
+                                 const char *msg) {
+  if (g_console_state) {
+    console_add_log(g_console_state, level, file, line, msg);
+  }
+}
+
 static bool handle_global_keys(int ch, bool *running, Modal *modal,
-                               ModelsFile *models) {
-  (void)ch;
+                               ModelsFile *models, ConsoleState *console,
+                               UIWindows *ui_windows, int *input_height) {
   (void)running;
-  (void)modal;
   (void)models;
+
+  // Don't handle global keys when modal is open
+  if (modal && modal_is_open(modal))
+    return false;
+
+  // Toggle console with Ctrl+L (12) or F12
+  if (ch == 12 || ch == KEY_F(12)) {
+    if (console) {
+      bool was_visible = console_is_visible(console);
+      console_toggle(console);
+      log_message(LOG_INFO, __FILE__, __LINE__, "Console %s",
+                  was_visible ? "hidden" : "shown");
+      if (ui_windows && input_height) {
+        // Update console height based on visibility
+        if (console_is_visible(console)) {
+          int rows, cols;
+          getmaxyx(stdscr, rows, cols);
+          // Set console to ~25% of screen or 8 lines, whichever is smaller
+          ui_windows->console_height = (rows / 4) < 8 ? (rows / 4) : 8;
+          if (ui_windows->console_height < 5)
+            ui_windows->console_height = 5;
+        } else {
+          ui_windows->console_height = 0;
+        }
+        ui_layout_windows(ui_windows, *input_height);
+      }
+      return true;
+    }
+  }
+
   return false;
 }
 
@@ -990,6 +1042,8 @@ int main(void) {
 
   ModelsFile models;
   config_load_models(&models);
+  log_message(LOG_INFO, __FILE__, __LINE__, "Loaded %zu model(s)",
+              models.count);
 
   AppSettings settings;
   config_load_settings(&settings);
@@ -1012,18 +1066,25 @@ int main(void) {
 
   ModelConfig *active_model = config_get_active(&models);
   if (active_model) {
+    log_message(LOG_INFO, __FILE__, __LINE__, "Active model: %s (API: %d)",
+                active_model->name, active_model->api_type);
     chat_tokenizer_set(&tokenizer, active_model->tokenizer_selection);
     set_current_tokenizer(&tokenizer);
+  } else {
+    log_message(LOG_WARNING, __FILE__, __LINE__, "No active model configured");
   }
 
   llm_init();
+  log_message(LOG_INFO, __FILE__, __LINE__, "Application starting");
 
   setlocale(LC_ALL, "");
 
   if (initscr() == NULL) {
+    log_message(LOG_ERROR, __FILE__, __LINE__, "Failed to initialize ncurses");
     fprintf(stderr, "Failed to initialize ncurses.\n");
     return EXIT_FAILURE;
   }
+  log_message(LOG_INFO, __FILE__, __LINE__, "ncurses initialized");
 
   set_escdelay(1);
   cbreak();
@@ -1035,12 +1096,24 @@ int main(void) {
 
   int current_input_height = 3;
 
-  WINDOW *chat_win = NULL;
-  WINDOW *input_win = NULL;
-  ui_layout_windows_with_input(&chat_win, &input_win, current_input_height);
+  UIWindows ui_windows = {.chat_win = NULL,
+                          .input_win = NULL,
+                          .console_win = NULL,
+                          .console_height = 0};
+  ui_layout_windows(&ui_windows, current_input_height);
+  WINDOW *chat_win = ui_windows.chat_win;
+  WINDOW *input_win = ui_windows.input_win;
 
   Modal modal;
   modal_init(&modal);
+
+  ConsoleState console;
+  console_init(&console);
+  // Store console pointer for callback
+  g_console_state = &console;
+  // Set up log callback to capture all log messages
+  log_set_callback(console_log_callback);
+  log_message(LOG_INFO, __FILE__, __LINE__, "Console logging initialized");
 
   SuggestionBox suggestions;
   suggestion_box_init(&suggestions, SLASH_COMMANDS, SLASH_COMMAND_COUNT);
@@ -1098,16 +1171,91 @@ int main(void) {
                user_disp, bot_disp, false);
   ui_draw_input_multiline_ex(input_win, input_buffer, cursor_pos, input_focused,
                              input_scroll_line, false, &attachments);
+  if (console_is_visible(&console) && ui_windows.console_win) {
+    ui_draw_console(ui_windows.console_win, &console);
+  }
 
   while (running) {
     user_disp = get_user_display_name(&persona);
     bot_disp = get_bot_display_name(&character, character_loaded);
-    WINDOW *active_win = modal_is_open(&modal) ? modal.win : input_win;
-    int ch = wgetch(active_win);
 
-    bool global_key_handled = handle_global_keys(ch, &running, &modal, &models);
+    // Redraw console if it needs updating and is visible
+    if (console_is_visible(&console) && ui_windows.console_win &&
+        console.needs_redraw) {
+      ui_draw_console(ui_windows.console_win, &console);
+    }
+
+    WINDOW *active_win = modal_is_open(&modal) ? modal.win : input_win;
+    // Set timeout to allow console updates while waiting for input
+    // Use 100ms timeout - short enough to feel responsive, long enough to not
+    // be wasteful
+    wtimeout(active_win, 100);
+    int ch = wgetch(active_win);
+    wtimeout(active_win, -1); // Reset to blocking mode
+
+    // If no key was pressed (timeout), continue loop to check for console
+    // updates
+    if (ch == ERR) {
+      continue;
+    }
+
+    // Handle global keys (console toggle, etc.)
+    bool global_key_handled =
+        handle_global_keys(ch, &running, &modal, &models, &console, &ui_windows,
+                           &current_input_height);
     if (global_key_handled) {
+      chat_win = ui_windows.chat_win;
+      input_win = ui_windows.input_win;
       if (!modal_is_open(&modal)) {
+        touchwin(chat_win);
+        touchwin(input_win);
+        if (ui_windows.console_win)
+          touchwin(ui_windows.console_win);
+        ui_draw_chat(chat_win, &history, selected_msg, get_model_name(&models),
+                     user_disp, bot_disp, false);
+        ui_draw_input_multiline_ex(input_win, input_buffer, cursor_pos,
+                                   input_focused, input_scroll_line, false,
+                                   &attachments);
+        if (console_is_visible(&console) && ui_windows.console_win) {
+          ui_draw_console(ui_windows.console_win, &console);
+        }
+      }
+      continue;
+    }
+
+    // Handle console-specific keys when console is visible and focused
+    if (console_is_visible(&console) && ui_windows.console_win &&
+        active_win == ui_windows.console_win) {
+      if (ch == KEY_UP || ch == 'k') {
+        console_scroll(&console, 1);
+        ui_draw_console(ui_windows.console_win, &console);
+        continue;
+      } else if (ch == KEY_DOWN || ch == 'j') {
+        console_scroll(&console, -1);
+        ui_draw_console(ui_windows.console_win, &console);
+        continue;
+      } else if (ch == KEY_PPAGE) {
+        int h, w;
+        getmaxyx(ui_windows.console_win, h, w);
+        console_scroll(&console, h - 2);
+        ui_draw_console(ui_windows.console_win, &console);
+        continue;
+      } else if (ch == KEY_NPAGE) {
+        int h, w;
+        getmaxyx(ui_windows.console_win, h, w);
+        console_scroll(&console, -(h - 2));
+        ui_draw_console(ui_windows.console_win, &console);
+        continue;
+      } else if (ch == 'G') {
+        console_scroll_to_bottom(&console);
+        ui_draw_console(ui_windows.console_win, &console);
+        continue;
+      } else if (ch == 'q' || ch == 27) { // 'q' or ESC to close console
+        console_set_visible(&console, false);
+        ui_windows.console_height = 0;
+        ui_layout_windows(&ui_windows, current_input_height);
+        chat_win = ui_windows.chat_win;
+        input_win = ui_windows.input_win;
         touchwin(chat_win);
         touchwin(input_win);
         ui_draw_chat(chat_win, &history, selected_msg, get_model_name(&models),
@@ -1115,12 +1263,14 @@ int main(void) {
         ui_draw_input_multiline_ex(input_win, input_buffer, cursor_pos,
                                    input_focused, input_scroll_line, false,
                                    &attachments);
+        continue;
       }
-      continue;
     }
 
     if (ch == KEY_RESIZE) {
-      ui_layout_windows_with_input(&chat_win, &input_win, current_input_height);
+      ui_layout_windows(&ui_windows, current_input_height);
+      chat_win = ui_windows.chat_win;
+      input_win = ui_windows.input_win;
       selected_msg = MSG_SELECT_NONE;
       input_focused = true;
       ui_draw_chat(chat_win, &history, selected_msg, get_model_name(&models),
@@ -1128,6 +1278,9 @@ int main(void) {
       ui_draw_input_multiline_ex(input_win, input_buffer, cursor_pos,
                                  input_focused, input_scroll_line, false,
                                  &attachments);
+      if (console_is_visible(&console) && ui_windows.console_win) {
+        ui_draw_console(ui_windows.console_win, &console);
+      }
       if (modal_is_open(&modal)) {
         modal_close(&modal);
       }

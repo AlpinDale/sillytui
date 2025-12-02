@@ -30,6 +30,7 @@ set(SOURCES
     src/ui/ui.c
     src/ui/modal.c
     src/ui/markdown.c
+    src/ui/console.c
     src/chat/chat.c
     src/chat/history.c
     src/chat/author_note.c
@@ -90,6 +91,7 @@ set(TEST_SOURCES
     src/ui/modal.c
     src/ui/ui.c
     src/ui/markdown.c
+    src/ui/console.c
     src/chat/chat.c
     src/character/character.c
     src/character/persona.c
