@@ -539,6 +539,7 @@ static bool handle_slash_command(const char *input, Modal *modal,
                                  CharacterCard *character, Persona *persona,
                                  bool *char_loaded, AuthorNote *author_note,
                                  Lorebook *lorebook, ChatTokenizer *tokenizer) {
+  log_message(LOG_INFO, __FILE__, __LINE__, "Slash command: %s", input);
   if (strcmp(input, "/model set") == 0) {
     modal_open_model_set(modal);
     return true;
@@ -603,15 +604,21 @@ static bool handle_slash_command(const char *input, Modal *modal,
       }
 
       if (loaded) {
+        log_message(LOG_INFO, __FILE__, __LINE__, "Chat loaded: %s", chat_id);
         if (loaded_char_path[0]) {
           if (*char_loaded) {
             character_free(character);
           }
           if (character_load(character, loaded_char_path)) {
             *char_loaded = true;
+            log_message(LOG_INFO, __FILE__, __LINE__,
+                        "Character loaded from chat: %s", loaded_char_path);
             snprintf(current_char_path, CHAT_CHAR_PATH_MAX, "%s",
                      loaded_char_path);
           } else {
+            log_message(LOG_WARNING, __FILE__, __LINE__,
+                        "Failed to load character from chat: %s",
+                        loaded_char_path);
             *char_loaded = false;
             current_char_path[0] = '\0';
           }
@@ -623,6 +630,8 @@ static bool handle_slash_command(const char *input, Modal *modal,
           current_char_path[0] = '\0';
         }
       } else {
+        log_message(LOG_WARNING, __FILE__, __LINE__, "Chat load failed: %s",
+                    chat_id[0] ? chat_id : "no ID");
         char err_msg[256];
         if (chat_id[0]) {
           snprintf(err_msg, sizeof(err_msg), "Chat '%s' not found for %s",
@@ -637,6 +646,7 @@ static bool handle_slash_command(const char *input, Modal *modal,
     return true;
   }
   if (strcmp(input, "/chat new") == 0) {
+    log_message(LOG_INFO, __FILE__, __LINE__, "Starting new chat");
     history_free(history);
     history_init(history);
     ui_reset_reasoning_state();
@@ -669,8 +679,11 @@ static bool handle_slash_command(const char *input, Modal *modal,
         path++;
     }
     if (path && *path) {
+      log_message(LOG_INFO, __FILE__, __LINE__, "Loading character: %s", path);
       if (character_load(character, path)) {
         *char_loaded = true;
+        log_message(LOG_INFO, __FILE__, __LINE__,
+                    "Character loaded successfully: %s", character->name);
         char *config_path = character_copy_to_config(path);
         if (config_path) {
           snprintf(current_char_path, CHAT_CHAR_PATH_MAX, "%s", config_path);
@@ -735,6 +748,8 @@ static bool handle_slash_command(const char *input, Modal *modal,
   }
   if (strcmp(input, "/char unload") == 0) {
     if (*char_loaded) {
+      log_message(LOG_INFO, __FILE__, __LINE__, "Unloading character: %s",
+                  character->name);
       character_free(character);
       *char_loaded = false;
       current_char_path[0] = '\0';
@@ -795,6 +810,7 @@ static bool handle_slash_command(const char *input, Modal *modal,
     return true;
   }
   if (strcmp(input, "/clear") == 0) {
+    log_message(LOG_INFO, __FILE__, __LINE__, "Clearing chat history");
     history_free(history);
     history_init(history);
     ui_reset_reasoning_state();
@@ -822,6 +838,8 @@ static bool handle_slash_command(const char *input, Modal *modal,
     while (*sys_msg == ' ')
       sys_msg++;
     if (*sys_msg) {
+      log_message(LOG_INFO, __FILE__, __LINE__, "Adding system message: %s",
+                  sys_msg);
       history_add_with_role(history, sys_msg, ROLE_SYSTEM);
       const char *char_name =
           (*char_loaded && character->name[0]) ? character->name : NULL;
@@ -899,14 +917,20 @@ static bool handle_slash_command(const char *input, Modal *modal,
     while (*path == ' ')
       path++;
     if (*path) {
+      log_message(LOG_INFO, __FILE__, __LINE__, "Loading lorebook: %s", path);
       lorebook_free(lorebook);
       lorebook_init(lorebook);
       if (lorebook_load_json(lorebook, path)) {
+        log_message(LOG_INFO, __FILE__, __LINE__,
+                    "Lorebook loaded: %s (%zu entries)", lorebook->name,
+                    lorebook->entry_count);
         char msg[256];
         snprintf(msg, sizeof(msg), "Loaded lorebook: %s (%zu entries)",
                  lorebook->name, lorebook->entry_count);
         modal_open_message(modal, msg, false);
       } else {
+        log_message(LOG_WARNING, __FILE__, __LINE__,
+                    "Failed to load lorebook: %s", path);
         modal_open_message(modal, "Failed to load lorebook", false);
       }
       return true;
@@ -1010,6 +1034,8 @@ static bool handle_slash_command(const char *input, Modal *modal,
     while (*name == ' ')
       name++;
     TokenizerSelection sel = tokenizer_selection_from_name(name);
+    log_message(LOG_INFO, __FILE__, __LINE__,
+                "Setting tokenizer to: %s (for model: %s)", name, active->name);
     active->tokenizer_selection = sel;
     config_save_models(mf);
     if (chat_tokenizer_set(tokenizer, sel)) {
@@ -1295,6 +1321,12 @@ int main(void) {
           &modal, ch, &models, &history, current_chat_id, current_char_path,
           sizeof(current_char_path), &persona, &selected_greeting);
       if (!modal_is_open(&modal) && was_model_edit) {
+        ModelConfig *active = config_get_active(&models);
+        if (active) {
+          log_message(LOG_INFO, __FILE__, __LINE__,
+                      "Model configuration changed, updating tokenizer for: %s",
+                      active->name);
+        }
         update_tokenizer_from_model(&tokenizer, &models);
       }
       if (result == MODAL_RESULT_CHAT_LOADED) {
@@ -1870,6 +1902,8 @@ int main(void) {
                                   .lorebook = &lorebook,
                                   .tokenizer = &tokenizer};
 
+            log_message(LOG_INFO, __FILE__, __LINE__,
+                        "Regenerating swipe for message %d", selected_msg);
             history_add_swipe(&history, selected_msg, "Bot: *thinking*");
             ui_draw_chat(chat_win, &history, selected_msg,
                          get_model_name(&models), user_disp, bot_disp, false);
@@ -1877,6 +1911,9 @@ int main(void) {
             ModelConfig *model = config_get_active(&models);
             const char *model_name = get_model_name(&models);
             if (model) {
+              log_message(LOG_DEBUG, __FILE__, __LINE__,
+                          "Starting swipe regeneration with model: %s",
+                          model_name);
               StreamContext ctx = {.history = &history,
                                    .chat_win = chat_win,
                                    .input_win = input_win,
@@ -1905,13 +1942,22 @@ int main(void) {
                            reasoning_callback, progress_callback, &ctx);
 
               if (!resp.success) {
+                log_message(LOG_ERROR, __FILE__, __LINE__,
+                            "Swipe regeneration failed: %s", resp.error);
                 char err_msg[512];
                 snprintf(err_msg, sizeof(err_msg),
                          "Bot: *frowns* \"Error: %s\"", resp.error);
                 history_update(&history, selected_msg, err_msg);
               } else if (ctx.buf_len == 0) {
+                log_message(LOG_WARNING, __FILE__, __LINE__,
+                            "Swipe regeneration returned empty response");
                 history_update(&history, selected_msg, "Bot: *stays silent*");
               } else {
+                log_message(LOG_INFO, __FILE__, __LINE__,
+                            "Swipe regeneration completed: %d tokens, %.1fms, "
+                            "%.1f tok/s",
+                            resp.completion_tokens, resp.elapsed_ms,
+                            resp.output_tps);
                 size_t active_swipe =
                     history_get_active_swipe(&history, selected_msg);
                 history_set_token_count(&history, selected_msg, active_swipe,
@@ -2250,7 +2296,13 @@ int main(void) {
       if (settings.paste_attachment_threshold > 0 &&
           input_len >= settings.paste_attachment_threshold &&
           attachments.count < MAX_ATTACHMENTS) {
+        log_message(
+            LOG_INFO, __FILE__, __LINE__,
+            "Creating attachment from paste (length: %d, threshold: %d)",
+            input_len, settings.paste_attachment_threshold);
         if (save_attachment_to_list(input_buffer, input_len, &attachments)) {
+          log_message(LOG_INFO, __FILE__, __LINE__,
+                      "Attachment created successfully");
           input_buffer[0] = '\0';
           input_len = 0;
           cursor_pos = 0;
@@ -2274,6 +2326,7 @@ int main(void) {
       }
 
       if (strcmp(input_buffer, "/quit") == 0) {
+        log_message(LOG_INFO, __FILE__, __LINE__, "User requested quit");
         running = false;
         break;
       }
@@ -2315,7 +2368,11 @@ int main(void) {
 
       char *msg_content = NULL;
 
+      // Log message being sent
       if (attachments.count > 0) {
+        log_message(LOG_INFO, __FILE__, __LINE__,
+                    "Sending message with %d attachment(s), text length: %d",
+                    attachments.count, input_len);
         size_t display_len = strlen(input_buffer) + 1;
         for (int i = 0; i < attachments.count; i++) {
           display_len += strlen(attachments.items[i].filename) + 20;
@@ -2372,6 +2429,8 @@ int main(void) {
           int user_tokens = llm_tokenize(model, expanded ? expanded : msg_text);
           if (expanded)
             free(expanded);
+          log_message(LOG_DEBUG, __FILE__, __LINE__,
+                      "User message tokenized: %d tokens", user_tokens);
           history_set_token_count(&history, user_msg_idx, 0, user_tokens);
         }
         selected_msg = MSG_SELECT_NONE;
@@ -2384,8 +2443,11 @@ int main(void) {
                                  &attachments);
 
       ModelConfig *active_model = config_get_active(&models);
-      if (active_model)
+      if (active_model) {
         sampler_load(&current_samplers, active_model->api_type);
+        log_message(LOG_DEBUG, __FILE__, __LINE__,
+                    "Samplers loaded for API type: %d", active_model->api_type);
+      }
       LLMContext llm_ctx = {.character = character_loaded ? &character : NULL,
                             .persona = &persona,
                             .samplers = &current_samplers,
@@ -2393,11 +2455,17 @@ int main(void) {
                             .lorebook = &lorebook,
                             .tokenizer = &tokenizer};
 
+      log_message(LOG_INFO, __FILE__, __LINE__,
+                  "Initiating LLM reply (history size: %zu)", history.count);
       do_llm_reply(&history, chat_win, input_win, NULL, &models, &selected_msg,
                    &llm_ctx, user_disp, bot_disp);
 
       const char *char_name =
           (character_loaded && character.name[0]) ? character.name : NULL;
+      log_message(LOG_DEBUG, __FILE__, __LINE__,
+                  "Auto-saving chat (ID: %s, character: %s)",
+                  current_chat_id[0] ? current_chat_id : "new",
+                  char_name ? char_name : "none");
       chat_auto_save_with_note(&history, &author_note, current_chat_id,
                                sizeof(current_chat_id), current_char_path,
                                char_name);
@@ -2446,6 +2514,8 @@ int main(void) {
         }
       } else if (attachments.selected >= 0) {
         int removed_idx = attachments.selected;
+        log_message(LOG_INFO, __FILE__, __LINE__, "Deleting attachment: %s",
+                    attachments.items[removed_idx].filename);
         delete_attachment_file(attachments.items[removed_idx].filename);
         attachment_list_remove(&attachments, removed_idx);
         if (attachments.count == 0) {
@@ -2477,6 +2547,8 @@ int main(void) {
         continue;
       if (attachments.selected >= 0) {
         int removed_idx = attachments.selected;
+        log_message(LOG_INFO, __FILE__, __LINE__, "Deleting attachment: %s",
+                    attachments.items[removed_idx].filename);
         delete_attachment_file(attachments.items[removed_idx].filename);
         attachment_list_remove(&attachments, removed_idx);
         if (attachments.count == 0) {
