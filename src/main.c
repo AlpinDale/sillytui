@@ -27,6 +27,7 @@
 #include "ui/ui.h"
 
 extern char *expand_attachments(const char *content);
+extern void set_current_tokenizer(ChatTokenizer *tokenizer);
 
 #define INPUT_MAX 8192
 
@@ -461,6 +462,15 @@ static const SlashCommand SLASH_COMMANDS[] = {
     {"quit", "Exit the application"},
 };
 #define SLASH_COMMAND_COUNT (sizeof(SLASH_COMMANDS) / sizeof(SLASH_COMMANDS[0]))
+
+static void update_tokenizer_from_model(ChatTokenizer *tokenizer,
+                                        const ModelsFile *models) {
+  ModelConfig *active = config_get_active((ModelsFile *)models);
+  if (active) {
+    chat_tokenizer_set(tokenizer, active->tokenizer_selection);
+    set_current_tokenizer(tokenizer);
+  }
+}
 
 static bool handle_slash_command(const char *input, Modal *modal,
                                  ModelsFile *mf, ChatHistory *history,
@@ -908,26 +918,39 @@ static bool handle_slash_command(const char *input, Modal *modal,
     return true;
   }
   if (strcmp(input, "/tokenizer") == 0) {
+    ModelConfig *active = config_get_active(mf);
+    if (!active) {
+      modal_open_message(modal, "No model selected", true);
+      return true;
+    }
     char msg[1024];
     int pos = 0;
     pos += snprintf(msg + pos, sizeof(msg) - pos,
                     "Current: %s\n\nAvailable tokenizers:\n",
-                    tokenizer_selection_name(tokenizer->selection));
+                    tokenizer_selection_name(active->tokenizer_selection));
     for (int i = 0; i < TOKENIZER_COUNT; i++) {
       pos += snprintf(msg + pos, sizeof(msg) - pos, "  %s - %s\n",
                       tokenizer_selection_name(i),
                       tokenizer_selection_description(i));
     }
     pos += snprintf(msg + pos, sizeof(msg) - pos,
-                    "\nUse /tokenizer <name> to select");
+                    "\nUse /tokenizer <name> to select\n"
+                    "Or edit the model to change tokenizer");
     modal_open_message(modal, msg, false);
     return true;
   }
   if (strncmp(input, "/tokenizer ", 11) == 0) {
+    ModelConfig *active = config_get_active(mf);
+    if (!active) {
+      modal_open_message(modal, "No model selected", true);
+      return true;
+    }
     const char *name = input + 11;
     while (*name == ' ')
       name++;
     TokenizerSelection sel = tokenizer_selection_from_name(name);
+    active->tokenizer_selection = sel;
+    config_save_models(mf);
     if (chat_tokenizer_set(tokenizer, sel)) {
       char msg[256];
       snprintf(msg, sizeof(msg), "Tokenizer set to: %s\n%s",
@@ -977,6 +1000,12 @@ int main(void) {
 
   ChatTokenizer tokenizer;
   chat_tokenizer_init(&tokenizer);
+
+  ModelConfig *active_model = config_get_active(&models);
+  if (active_model) {
+    chat_tokenizer_set(&tokenizer, active_model->tokenizer_selection);
+    set_current_tokenizer(&tokenizer);
+  }
 
   llm_init();
 
@@ -1083,10 +1112,15 @@ int main(void) {
     }
 
     if (modal_is_open(&modal)) {
+      bool was_model_edit =
+          (modal.type == MODAL_MODEL_EDIT || modal.type == MODAL_MODEL_SET);
       size_t selected_greeting = 0;
       ModalResult result = modal_handle_key(
           &modal, ch, &models, &history, current_chat_id, current_char_path,
           sizeof(current_char_path), &persona, &selected_greeting);
+      if (!modal_is_open(&modal) && was_model_edit) {
+        update_tokenizer_from_model(&tokenizer, &models);
+      }
       if (result == MODAL_RESULT_CHAT_LOADED) {
         selected_msg = MSG_SELECT_NONE;
         input_focused = true;

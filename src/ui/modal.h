@@ -6,6 +6,7 @@
 #include "chat/chat.h"
 #include "core/config.h"
 #include "llm/sampler.h"
+#include "tokenizer/selector.h"
 #include <curses.h>
 #include <stdbool.h>
 
@@ -42,6 +43,7 @@ typedef struct {
   int field_cursor[6];
   int field_len[6];
   ApiType api_type_selection;
+  TokenizerSelection tokenizer_selection;
 
   char **fetched_models;
   size_t fetched_models_count;

@@ -261,6 +261,7 @@ void modal_open_model_set(Modal *m) {
   m->field_len[4] = (int)strlen(m->fields[4]);
   m->field_cursor[4] = m->field_len[4];
   m->api_type_selection = API_TYPE_APHRODITE;
+  m->tokenizer_selection = TOKENIZER_API;
 
   const char *url = get_default_base_url(m->api_type_selection);
   strncpy(m->fields[1], url, sizeof(m->fields[1]) - 1);
@@ -317,6 +318,7 @@ void modal_open_model_edit(Modal *m, const ModelsFile *mf, int model_index) {
   m->field_cursor[4] = m->field_len[4];
 
   m->api_type_selection = mc->api_type;
+  m->tokenizer_selection = mc->tokenizer_selection;
 
   create_window(m, 21, 60);
 }
@@ -749,11 +751,26 @@ static void draw_model_set(Modal *m) {
     wattroff(w, A_REVERSE);
   y += 2;
 
+  bool tokenizer_selected = (m->field_index == 1);
+  if (tokenizer_selected)
+    wattron(w, A_BOLD);
+  mvwprintw(w, y, 3, "Tokenizer:");
+  if (tokenizer_selected)
+    wattroff(w, A_BOLD);
+
+  if (tokenizer_selected)
+    wattron(w, A_REVERSE);
+  mvwprintw(w, y, 14, " < %s > ",
+            tokenizer_selection_name(m->tokenizer_selection));
+  if (tokenizer_selected)
+    wattroff(w, A_REVERSE);
+  y += 2;
+
   draw_model_fields(m, w, &y, field_w);
 
   int btn_y = m->height - 2;
-  draw_button(w, btn_y, m->width / 2 - 12, "Save", m->field_index == 6);
-  draw_button(w, btn_y, m->width / 2 + 2, "Cancel", m->field_index == 7);
+  draw_button(w, btn_y, m->width / 2 - 12, "Save", m->field_index == 7);
+  draw_button(w, btn_y, m->width / 2 + 2, "Cancel", m->field_index == 8);
 
   wattron(w, COLOR_PAIR(COLOR_PAIR_HINT) | A_DIM);
   mvwprintw(w, btn_y, 3, "Tab: next");
@@ -785,11 +802,26 @@ static void draw_model_edit(Modal *m) {
     wattroff(w, A_REVERSE);
   y += 2;
 
+  bool tokenizer_selected = (m->field_index == 1);
+  if (tokenizer_selected)
+    wattron(w, A_BOLD);
+  mvwprintw(w, y, 3, "Tokenizer:");
+  if (tokenizer_selected)
+    wattroff(w, A_BOLD);
+
+  if (tokenizer_selected)
+    wattron(w, A_REVERSE);
+  mvwprintw(w, y, 14, " < %s > ",
+            tokenizer_selection_name(m->tokenizer_selection));
+  if (tokenizer_selected)
+    wattroff(w, A_REVERSE);
+  y += 2;
+
   draw_model_fields(m, w, &y, field_w);
 
   int btn_y = m->height - 2;
-  draw_button(w, btn_y, m->width / 2 - 12, "Save", m->field_index == 6);
-  draw_button(w, btn_y, m->width / 2 + 2, "Cancel", m->field_index == 7);
+  draw_button(w, btn_y, m->width / 2 - 12, "Save", m->field_index == 7);
+  draw_button(w, btn_y, m->width / 2 + 2, "Cancel", m->field_index == 8);
 
   wattron(w, COLOR_PAIR(COLOR_PAIR_HINT) | A_DIM);
   mvwprintw(w, btn_y, 3, "Tab: next");
@@ -2532,11 +2564,11 @@ ModalResult modal_handle_key(Modal *m, int ch, ModelsFile *mf,
     }
 
     if (ch == '\t' || ch == KEY_DOWN) {
-      m->field_index = (m->field_index + 1) % 8;
+      m->field_index = (m->field_index + 1) % 9;
       return MODAL_RESULT_NONE;
     }
     if (ch == KEY_BTAB || ch == KEY_UP) {
-      m->field_index = (m->field_index + 7) % 8;
+      m->field_index = (m->field_index + 8) % 9;
       return MODAL_RESULT_NONE;
     }
 
@@ -2554,7 +2586,19 @@ ModalResult modal_handle_key(Modal *m, int ch, ModelsFile *mf,
       }
     }
 
-    if (m->field_index == 4 && m->api_type_selection == API_TYPE_ANTHROPIC) {
+    if (m->field_index == 1) {
+      if (ch == KEY_LEFT || ch == 'h') {
+        m->tokenizer_selection =
+            (m->tokenizer_selection + TOKENIZER_COUNT - 1) % TOKENIZER_COUNT;
+        return MODAL_RESULT_NONE;
+      }
+      if (ch == KEY_RIGHT || ch == 'l') {
+        m->tokenizer_selection = (m->tokenizer_selection + 1) % TOKENIZER_COUNT;
+        return MODAL_RESULT_NONE;
+      }
+    }
+
+    if (m->field_index == 5 && m->api_type_selection == API_TYPE_ANTHROPIC) {
       size_t count;
       const char **models = anthropic_get_models(&count);
       if (ch == KEY_LEFT || ch == 'h') {
@@ -2592,14 +2636,14 @@ ModalResult modal_handle_key(Modal *m, int ch, ModelsFile *mf,
                              m->api_type_selection == API_TYPE_OPENAI ||
                              m->api_type_selection == API_TYPE_TABBY);
 
-    if (m->field_index == 4 && is_openai_compat && ch == 'f') {
+    if (m->field_index == 5 && is_openai_compat && ch == 'f') {
       if (!fetch_models_from_api(m)) {
         modal_open_message(m, "Failed to fetch models from API", true);
       }
       return MODAL_RESULT_NONE;
     }
 
-    if (m->field_index == 4 && is_openai_compat &&
+    if (m->field_index == 5 && is_openai_compat &&
         m->fetched_models_count > 0) {
       if (ch == KEY_LEFT || ch == 'h') {
         int current = -1;
@@ -2637,11 +2681,11 @@ ModalResult modal_handle_key(Modal *m, int ch, ModelsFile *mf,
     }
 
     if (ch == '\n' || ch == '\r') {
-      if (m->field_index == 7) {
+      if (m->field_index == 8) {
         modal_close(m);
         return MODAL_RESULT_NONE;
       }
-      if (m->field_index == 6) {
+      if (m->field_index == 7) {
         if (m->fields[0][0] == '\0') {
           modal_open_message(m, "Name is required", true);
           return MODAL_RESULT_NONE;
@@ -2664,6 +2708,7 @@ ModalResult modal_handle_key(Modal *m, int ch, ModelsFile *mf,
         if (mc.context_length <= 0)
           mc.context_length = DEFAULT_CONTEXT_LENGTH;
         mc.api_type = m->api_type_selection;
+        mc.tokenizer_selection = m->tokenizer_selection;
 
         if (config_add_model(mf, &mc)) {
           if (mf->active_index < 0) {
@@ -2676,12 +2721,12 @@ ModalResult modal_handle_key(Modal *m, int ch, ModelsFile *mf,
         }
         return MODAL_RESULT_NONE;
       }
-      m->field_index = (m->field_index + 1) % 8;
+      m->field_index = (m->field_index + 1) % 9;
       return MODAL_RESULT_NONE;
     }
 
-    if (m->field_index >= 1 && m->field_index <= 5) {
-      int fi = m->field_index - 1;
+    if (m->field_index >= 2 && m->field_index <= 6) {
+      int fi = m->field_index - 2;
       char *field = m->fields[fi];
       int *cursor = &m->field_cursor[fi];
       int *len = &m->field_len[fi];
@@ -2792,11 +2837,11 @@ ModalResult modal_handle_key(Modal *m, int ch, ModelsFile *mf,
     }
 
     if (ch == '\t' || ch == KEY_DOWN) {
-      m->field_index = (m->field_index + 1) % 8;
+      m->field_index = (m->field_index + 1) % 9;
       return MODAL_RESULT_NONE;
     }
     if (ch == KEY_BTAB || ch == KEY_UP) {
-      m->field_index = (m->field_index + 7) % 8;
+      m->field_index = (m->field_index + 8) % 9;
       return MODAL_RESULT_NONE;
     }
 
@@ -2814,7 +2859,19 @@ ModalResult modal_handle_key(Modal *m, int ch, ModelsFile *mf,
       }
     }
 
-    if (m->field_index == 4 && m->api_type_selection == API_TYPE_ANTHROPIC) {
+    if (m->field_index == 1) {
+      if (ch == KEY_LEFT || ch == 'h') {
+        m->tokenizer_selection =
+            (m->tokenizer_selection + TOKENIZER_COUNT - 1) % TOKENIZER_COUNT;
+        return MODAL_RESULT_NONE;
+      }
+      if (ch == KEY_RIGHT || ch == 'l') {
+        m->tokenizer_selection = (m->tokenizer_selection + 1) % TOKENIZER_COUNT;
+        return MODAL_RESULT_NONE;
+      }
+    }
+
+    if (m->field_index == 5 && m->api_type_selection == API_TYPE_ANTHROPIC) {
       size_t count;
       const char **models = anthropic_get_models(&count);
       if (ch == KEY_LEFT || ch == 'h') {
@@ -2852,14 +2909,14 @@ ModalResult modal_handle_key(Modal *m, int ch, ModelsFile *mf,
                                   m->api_type_selection == API_TYPE_OPENAI ||
                                   m->api_type_selection == API_TYPE_TABBY);
 
-    if (m->field_index == 4 && is_openai_compat_edit && ch == 'f') {
+    if (m->field_index == 5 && is_openai_compat_edit && ch == 'f') {
       if (!fetch_models_from_api(m)) {
         modal_open_message(m, "Failed to fetch models from API", true);
       }
       return MODAL_RESULT_NONE;
     }
 
-    if (m->field_index == 4 && is_openai_compat_edit &&
+    if (m->field_index == 5 && is_openai_compat_edit &&
         m->fetched_models_count > 0) {
       if (ch == KEY_LEFT || ch == 'h') {
         int current = -1;
@@ -2897,11 +2954,11 @@ ModalResult modal_handle_key(Modal *m, int ch, ModelsFile *mf,
     }
 
     if (ch == '\n' || ch == '\r') {
-      if (m->field_index == 7) {
+      if (m->field_index == 8) {
         modal_open_model_list(m, mf);
         return MODAL_RESULT_NONE;
       }
-      if (m->field_index == 6) {
+      if (m->field_index == 7) {
         if (m->fields[0][0] == '\0') {
           modal_open_message(m, "Name is required", true);
           return MODAL_RESULT_NONE;
@@ -2924,17 +2981,18 @@ ModalResult modal_handle_key(Modal *m, int ch, ModelsFile *mf,
         if (mc->context_length <= 0)
           mc->context_length = DEFAULT_CONTEXT_LENGTH;
         mc->api_type = m->api_type_selection;
+        mc->tokenizer_selection = m->tokenizer_selection;
 
         config_save_models(mf);
         modal_open_message(m, "Model updated!", false);
         return MODAL_RESULT_NONE;
       }
-      m->field_index = (m->field_index + 1) % 8;
+      m->field_index = (m->field_index + 1) % 9;
       return MODAL_RESULT_NONE;
     }
 
-    if (m->field_index >= 1 && m->field_index <= 5) {
-      int fi = m->field_index - 1;
+    if (m->field_index >= 2 && m->field_index <= 6) {
+      int fi = m->field_index - 2;
       char *field = m->fields[fi];
       int *cursor = &m->field_cursor[fi];
       int *len = &m->field_len[fi];

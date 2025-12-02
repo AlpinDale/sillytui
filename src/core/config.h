@@ -1,6 +1,7 @@
 #ifndef CONFIG_H
 #define CONFIG_H
 
+#include "tokenizer/selector.h"
 #include <stdbool.h>
 #include <stddef.h>
 
@@ -31,6 +32,7 @@ typedef struct {
   char model_id[MAX_MODEL_ID_LEN];
   int context_length;
   ApiType api_type;
+  TokenizerSelection tokenizer_selection;
 } ModelConfig;
 
 #define DEFAULT_CONTEXT_LENGTH 8192

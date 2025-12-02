@@ -1,4 +1,5 @@
 #include "core/config.h"
+#include "tokenizer/selector.h"
 #include <errno.h>
 #include <pwd.h>
 #include <stdio.h>
@@ -196,6 +197,7 @@ bool config_load_models(ModelsFile *mf) {
         ModelConfig *m = &mf->models[mf->count];
         memset(m, 0, sizeof(*m));
         m->context_length = DEFAULT_CONTEXT_LENGTH;
+        m->tokenizer_selection = TOKENIZER_API;
 
         while (*p) {
           p = skip_ws(p);
@@ -235,6 +237,10 @@ bool config_load_models(ModelsFile *mf) {
             char type_str[32] = {0};
             p = parse_string(p, type_str, sizeof(type_str));
             m->api_type = api_type_from_name(type_str);
+          } else if (strcmp(mkey, "tokenizer") == 0) {
+            char tok_str[32] = {0};
+            p = parse_string(p, tok_str, sizeof(tok_str));
+            m->tokenizer_selection = tokenizer_selection_from_name(tok_str);
           }
           if (!p)
             break;
@@ -282,7 +288,9 @@ bool config_save_models(const ModelsFile *mf) {
     fprintf(f, ",\n");
     fprintf(f, "      \"context_length\": %d,\n",
             m->context_length > 0 ? m->context_length : DEFAULT_CONTEXT_LENGTH);
-    fprintf(f, "      \"api_type\": \"%s\"\n", api_type_name(m->api_type));
+    fprintf(f, "      \"api_type\": \"%s\",\n", api_type_name(m->api_type));
+    fprintf(f, "      \"tokenizer\": \"%s\"\n",
+            tokenizer_selection_name(m->tokenizer_selection));
     fprintf(f, "    }%s\n", (i < mf->count - 1) ? "," : "");
   }
 
