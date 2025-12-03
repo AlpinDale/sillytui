@@ -14,6 +14,7 @@
 #define MD_PAIR_CODE 9
 #define MD_PAIR_CODE_BLOCK 10
 #define MD_PAIR_STRIKETHROUGH 13
+#define MD_PAIR_HEADER_MARKER 15
 #define MD_PAIR_NORMAL_SEL 5
 #define MD_PAIR_ITALIC_SEL 6
 #define MD_PAIR_QUOTE_SEL 7
@@ -21,6 +22,7 @@
 #define MD_PAIR_CODE_SEL 11
 #define MD_PAIR_CODE_BLOCK_SEL 12
 #define MD_PAIR_STRIKETHROUGH_SEL 14
+#define MD_PAIR_HEADER_MARKER_SEL 16
 
 #define MD_BG_SELECTED 236
 
@@ -71,6 +73,7 @@ void markdown_init_colors(void) {
   init_pair(MD_PAIR_CODE, 252, 238);
   init_pair(MD_PAIR_CODE_BLOCK, 252, 238);
   init_pair(MD_PAIR_STRIKETHROUGH, 88, -1);
+  init_pair(MD_PAIR_HEADER_MARKER, 240, -1);
 
   init_pair(MD_PAIR_NORMAL_SEL, -1, MD_BG_SELECTED);
   init_pair(MD_PAIR_ITALIC_SEL, 245, MD_BG_SELECTED);
@@ -79,6 +82,7 @@ void markdown_init_colors(void) {
   init_pair(MD_PAIR_CODE_SEL, 252, MD_BG_SELECTED);
   init_pair(MD_PAIR_CODE_BLOCK_SEL, 252, MD_BG_SELECTED);
   init_pair(MD_PAIR_STRIKETHROUGH_SEL, 88, MD_BG_SELECTED);
+  init_pair(MD_PAIR_HEADER_MARKER_SEL, 240, MD_BG_SELECTED);
 
   g_supports_color = true;
 }
@@ -353,6 +357,60 @@ static bool is_horizontal_rule(const char *text, size_t len, size_t pos) {
   return count >= 3;
 }
 
+static int detect_header_level(const char *text, size_t len) {
+  if (len == 0 || text[0] != '#')
+    return 0;
+
+  size_t count = 0;
+  while (count < len && count < 6 && text[count] == '#')
+    count++;
+
+  if (count >= len || text[count] != ' ')
+    return 0;
+
+  return (int)count;
+}
+
+static int detect_list_item(const char *text, size_t len,
+                            size_t *indent_level) {
+  if (len == 0)
+    return 0;
+
+  size_t i = 0;
+  int indent = 0;
+  while (i < len && (text[i] == ' ' || text[i] == '\t')) {
+    if (text[i] == ' ')
+      indent++;
+    else
+      indent += 4;
+    i++;
+  }
+
+  if (i >= len)
+    return 0;
+
+  char marker = text[i];
+  if ((marker == '-' || marker == '*' || marker == '+') && i + 1 < len &&
+      (text[i + 1] == ' ' || text[i + 1] == '\t')) {
+    if (indent_level)
+      *indent_level = indent;
+    return 1;
+  }
+
+  if (marker >= '0' && marker <= '9') {
+    while (i < len && text[i] >= '0' && text[i] <= '9')
+      i++;
+    if (i < len && text[i] == '.' && i + 1 < len &&
+        (text[i + 1] == ' ' || text[i + 1] == '\t')) {
+      if (indent_level)
+        *indent_level = indent;
+      return 2;
+    }
+  }
+
+  return 0;
+}
+
 static size_t find_inline_code_end(const char *text, size_t len, size_t start) {
   // Find the closing backtick for inline code
   // Inline code ends at: closing backtick, newline, or end of text
@@ -370,6 +428,98 @@ static size_t find_inline_code_end(const char *text, size_t len, size_t start) {
 }
 
 static void render_rp_text(RenderCtx *ctx, const char *text, size_t len) {
+  int header_level = detect_header_level(text, len);
+  bool is_header = header_level > 0 && !is_style_active(ctx, STYLE_CODE_BLOCK);
+
+  size_t list_indent = 0;
+  int list_type = detect_list_item(text, len, &list_indent);
+  bool is_list = list_type > 0 && !is_style_active(ctx, STYLE_CODE_BLOCK);
+
+  if (is_list) {
+    size_t i = list_indent;
+    if (i < len && (text[i] == ' ' || text[i] == '\t')) {
+      while (i < len && (text[i] == ' ' || text[i] == '\t'))
+        i++;
+    }
+
+    if (i < len) {
+      if (list_type == 1) {
+        if (ctx->cursor < ctx->max_width) {
+          for (size_t j = 0; j < list_indent && ctx->cursor < ctx->max_width;
+               j++) {
+            mvwaddch(ctx->win, ctx->row, ctx->start_col + ctx->cursor, ' ');
+            ctx->cursor++;
+          }
+          mvwaddstr(ctx->win, ctx->row, ctx->start_col + ctx->cursor, "•");
+          ctx->cursor++;
+          if (ctx->cursor < ctx->max_width) {
+            mvwaddch(ctx->win, ctx->row, ctx->start_col + ctx->cursor, ' ');
+            ctx->cursor++;
+          }
+        }
+        i++;
+        if (i < len && (text[i] == ' ' || text[i] == '\t'))
+          i++;
+      } else if (list_type == 2) {
+        if (ctx->cursor < ctx->max_width) {
+          for (size_t j = 0; j < list_indent && ctx->cursor < ctx->max_width;
+               j++) {
+            mvwaddch(ctx->win, ctx->row, ctx->start_col + ctx->cursor, ' ');
+            ctx->cursor++;
+          }
+          while (i < len && text[i] >= '0' && text[i] <= '9' &&
+                 ctx->cursor < ctx->max_width) {
+            mvwaddch(ctx->win, ctx->row, ctx->start_col + ctx->cursor, text[i]);
+            ctx->cursor++;
+            i++;
+          }
+          if (i < len && text[i] == '.' && ctx->cursor < ctx->max_width) {
+            mvwaddch(ctx->win, ctx->row, ctx->start_col + ctx->cursor, '.');
+            ctx->cursor++;
+            i++;
+          }
+          if (ctx->cursor < ctx->max_width) {
+            mvwaddch(ctx->win, ctx->row, ctx->start_col + ctx->cursor, ' ');
+            ctx->cursor++;
+          }
+        }
+        if (i < len && (text[i] == ' ' || text[i] == '\t'))
+          i++;
+      }
+
+      text += i;
+      len -= i;
+    }
+  }
+
+  if (is_header) {
+    int marker_pair = (ctx->bg_color == MD_BG_SELECTED)
+                          ? MD_PAIR_HEADER_MARKER_SEL
+                          : MD_PAIR_HEADER_MARKER;
+    if (g_supports_color)
+      wattron(ctx->win, COLOR_PAIR(marker_pair));
+    for (int j = 0; j < header_level; j++) {
+      if (ctx->cursor >= ctx->max_width)
+        break;
+      mvwaddch(ctx->win, ctx->row, ctx->start_col + ctx->cursor, '#');
+      ctx->cursor++;
+    }
+    if (g_supports_color)
+      wattroff(ctx->win, COLOR_PAIR(marker_pair));
+
+    if (ctx->cursor < ctx->max_width) {
+      mvwaddch(ctx->win, ctx->row, ctx->start_col + ctx->cursor, ' ');
+      ctx->cursor++;
+    }
+
+    size_t i = (size_t)header_level;
+    if (i < len && text[i] == ' ')
+      i++;
+
+    text += i;
+    len -= i;
+  }
+
   for (size_t i = 0; i < len && ctx->cursor < ctx->max_width;) {
     char ch = text[i];
 
@@ -773,6 +923,9 @@ unsigned markdown_render_line_bg(WINDOW *win, int row, int start_col, int width,
 
   wattrset(win, A_NORMAL);
 
+  int header_level = detect_header_level(text, strlen(text));
+  bool is_header = header_level > 0 && !in_code_block;
+
   RenderCtx ctx = {.win = win,
                    .row = row,
                    .start_col = start_col,
@@ -785,8 +938,12 @@ unsigned markdown_render_line_bg(WINDOW *win, int row, int start_col, int width,
                    .code_block_just_started = code_block_starts,
                    .code_block_just_ended = code_block_ends};
 
-  if (initial_style & STYLE_BOLD)
+  if (is_header) {
     push_style(&ctx, STYLE_BOLD);
+  } else {
+    if (initial_style & STYLE_BOLD)
+      push_style(&ctx, STYLE_BOLD);
+  }
   if (initial_style & STYLE_ITALIC)
     push_style(&ctx, STYLE_ITALIC);
   if (initial_style & STYLE_QUOTE)
@@ -815,6 +972,17 @@ static unsigned compute_style_internal(const char *text, size_t len,
   bool in_code = (style & STYLE_CODE) != 0;
   bool in_code_block = (style & STYLE_CODE_BLOCK) != 0;
   bool in_strikethrough = (style & STYLE_STRIKETHROUGH) != 0;
+
+  int header_level = detect_header_level(text, len);
+  bool is_header = header_level > 0 && !in_code_block;
+  if (is_header) {
+    in_bold = true;
+    size_t i = (size_t)header_level;
+    if (i < len && text[i] == ' ')
+      i++;
+    text += i;
+    len -= i;
+  }
 
   for (size_t i = 0; i < len;) {
     char ch = text[i];

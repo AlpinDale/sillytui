@@ -1465,6 +1465,70 @@ TEST(markdown_triple_asterisk_bold_italic) {
   PASS();
 }
 
+TEST(markdown_header_h1) {
+  markdown_init_colors();
+
+  unsigned style = markdown_compute_style_after("# Header 1", 10, 0);
+  ASSERT((style & 0x04) != 0);
+
+  PASS();
+}
+
+TEST(markdown_header_h2) {
+  markdown_init_colors();
+
+  unsigned style = markdown_compute_style_after("## Header 2", 11, 0);
+  ASSERT((style & 0x04) != 0);
+
+  PASS();
+}
+
+TEST(markdown_header_h3) {
+  markdown_init_colors();
+
+  unsigned style = markdown_compute_style_after("### Header 3", 12, 0);
+  ASSERT((style & 0x04) != 0);
+
+  PASS();
+}
+
+TEST(markdown_header_h6) {
+  markdown_init_colors();
+
+  unsigned style = markdown_compute_style_after("###### Header 6", 15, 0);
+  ASSERT((style & 0x04) != 0);
+
+  PASS();
+}
+
+TEST(markdown_header_not_header) {
+  markdown_init_colors();
+
+  unsigned style1 = markdown_compute_style_after("#not a header", 13, 0);
+  ASSERT((style1 & 0x04) == 0);
+
+  unsigned style2 = markdown_compute_style_after("##not a header", 14, 0);
+  ASSERT((style2 & 0x04) == 0);
+
+  unsigned style3 = markdown_compute_style_after("text # not header", 17, 0);
+  ASSERT((style3 & 0x04) == 0);
+
+  PASS();
+}
+
+TEST(markdown_header_with_formatting) {
+  markdown_init_colors();
+
+  unsigned style =
+      markdown_compute_style_after("# Header with **bold**", 22, 0);
+  ASSERT((style & 0x04) != 0);
+
+  style = markdown_compute_style_after("## Header with *italic*", 23, 0);
+  ASSERT((style & 0x04) != 0);
+
+  PASS();
+}
+
 void run_robustness_tests(void) {
   TEST_SUITE("Robustness Tests");
   RUN_TEST(robust_history_very_long_message);
@@ -1579,4 +1643,10 @@ void run_robustness_tests(void) {
   RUN_TEST(markdown_url_auto_detection);
   RUN_TEST(markdown_quotes_basic);
   RUN_TEST(markdown_triple_asterisk_bold_italic);
+  RUN_TEST(markdown_header_h1);
+  RUN_TEST(markdown_header_h2);
+  RUN_TEST(markdown_header_h3);
+  RUN_TEST(markdown_header_h6);
+  RUN_TEST(markdown_header_not_header);
+  RUN_TEST(markdown_header_with_formatting);
 }
