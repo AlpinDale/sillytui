@@ -273,6 +273,7 @@ static int wrap_text(const char *text, int width, WrappedLine *out,
     const char *last_break = NULL;
     int col = 0;
     const char *scan = line_start;
+    bool is_hard_break = false;
 
     while (*scan && *scan != '\n' && col < width) {
       if (*scan == ' ') {
@@ -283,13 +284,30 @@ static int wrap_text(const char *text, int width, WrappedLine *out,
       col++;
     }
 
+    if (*scan == '\n') {
+      if (scan > line_start + 1 && scan[-1] == ' ' && scan[-2] == ' ') {
+        is_hard_break = true;
+      } else if (scan > line_start && scan[-1] == '\\') {
+        is_hard_break = true;
+      }
+    }
+
     int line_len;
     if (!*scan || *scan == '\n') {
       line_len = (int)(scan - line_start);
+      if (is_hard_break) {
+        if (line_len >= 2 && line_start[line_len - 1] == ' ' &&
+            line_start[line_len - 2] == ' ') {
+          line_len -= 2;
+        } else if (line_len >= 1 && line_start[line_len - 1] == '\\') {
+          line_len -= 1;
+        }
+      }
       if (*scan == '\n')
         scan++;
       p = scan;
-    } else if (!in_code_block && last_break && last_break > line_start) {
+    } else if (!in_code_block && last_break && last_break > line_start &&
+               !is_hard_break) {
       line_len = (int)(last_break - line_start);
       p = last_break + 1;
       while (*p == ' ')

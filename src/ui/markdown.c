@@ -68,7 +68,7 @@ void markdown_init_colors(void) {
 
   init_pair(MD_PAIR_NORMAL, -1, -1);
   init_pair(MD_PAIR_ITALIC, 245, -1);
-  init_pair(MD_PAIR_QUOTE, 218, -1);
+  init_pair(MD_PAIR_QUOTE, 76, -1);
   init_pair(MD_PAIR_URL, 75, -1);
   init_pair(MD_PAIR_CODE, 252, 238);
   init_pair(MD_PAIR_CODE_BLOCK, 252, 238);
@@ -77,7 +77,7 @@ void markdown_init_colors(void) {
 
   init_pair(MD_PAIR_NORMAL_SEL, -1, MD_BG_SELECTED);
   init_pair(MD_PAIR_ITALIC_SEL, 245, MD_BG_SELECTED);
-  init_pair(MD_PAIR_QUOTE_SEL, 218, MD_BG_SELECTED);
+  init_pair(MD_PAIR_QUOTE_SEL, 76, MD_BG_SELECTED);
   init_pair(MD_PAIR_URL_SEL, 75, MD_BG_SELECTED);
   init_pair(MD_PAIR_CODE_SEL, 252, MD_BG_SELECTED);
   init_pair(MD_PAIR_CODE_BLOCK_SEL, 252, MD_BG_SELECTED);
@@ -411,6 +411,26 @@ static int detect_list_item(const char *text, size_t len,
   return 0;
 }
 
+static bool detect_blockquote(const char *text, size_t len, size_t *skip_len) {
+  if (len == 0)
+    return false;
+
+  size_t i = 0;
+  while (i < len && (text[i] == ' ' || text[i] == '\t'))
+    i++;
+
+  if (i >= len || text[i] != '>')
+    return false;
+
+  i++;
+  if (i < len && (text[i] == ' ' || text[i] == '\t'))
+    i++;
+
+  if (skip_len)
+    *skip_len = i;
+  return true;
+}
+
 static size_t find_inline_code_end(const char *text, size_t len, size_t start) {
   // Find the closing backtick for inline code
   // Inline code ends at: closing backtick, newline, or end of text
@@ -434,6 +454,20 @@ static void render_rp_text(RenderCtx *ctx, const char *text, size_t len) {
   size_t list_indent = 0;
   int list_type = detect_list_item(text, len, &list_indent);
   bool is_list = list_type > 0 && !is_style_active(ctx, STYLE_CODE_BLOCK);
+
+  size_t blockquote_skip = 0;
+  bool is_blockquote = detect_blockquote(text, len, &blockquote_skip) &&
+                       !is_style_active(ctx, STYLE_CODE_BLOCK);
+
+  if (is_blockquote) {
+    if (ctx->cursor < ctx->max_width) {
+      mvwaddstr(ctx->win, ctx->row, ctx->start_col + ctx->cursor, "│ ");
+      ctx->cursor += 2;
+    }
+    push_style(ctx, STYLE_QUOTE);
+    text += blockquote_skip;
+    len -= blockquote_skip;
+  }
 
   if (is_list) {
     size_t i = list_indent;
@@ -750,6 +784,10 @@ static void render_rp_text(RenderCtx *ctx, const char *text, size_t len) {
       i++;
     }
   }
+
+  if (is_blockquote) {
+    pop_style(ctx, STYLE_QUOTE);
+  }
 }
 
 void markdown_render_line(WINDOW *win, int row, int start_col, int width,
@@ -984,6 +1022,15 @@ static unsigned compute_style_internal(const char *text, size_t len,
     len -= i;
   }
 
+  size_t blockquote_skip = 0;
+  bool is_blockquote =
+      detect_blockquote(text, len, &blockquote_skip) && !in_code_block;
+  bool blockquote_was_active = is_blockquote;
+  if (is_blockquote) {
+    text += blockquote_skip;
+    len -= blockquote_skip;
+  }
+
   for (size_t i = 0; i < len;) {
     char ch = text[i];
 
@@ -1070,7 +1117,7 @@ static unsigned compute_style_internal(const char *text, size_t len,
     result |= STYLE_BOLD;
   if (in_italic)
     result |= STYLE_ITALIC;
-  if (in_quote)
+  if (in_quote && !blockquote_was_active)
     result |= STYLE_QUOTE;
   if (in_code)
     result |= STYLE_CODE;

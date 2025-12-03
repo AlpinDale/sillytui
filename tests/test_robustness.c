@@ -1529,6 +1529,47 @@ TEST(markdown_header_with_formatting) {
   PASS();
 }
 
+TEST(markdown_blockquote_basic) {
+  markdown_init_colors();
+
+  unsigned style = markdown_compute_style_after("> Quote text", 12, 0);
+  ASSERT((style & 0x02) == 0);
+
+  PASS();
+}
+
+TEST(markdown_blockquote_multiline) {
+  markdown_init_colors();
+
+  unsigned style = markdown_compute_style_after("> First line", 12, 0);
+  ASSERT((style & 0x02) == 0);
+  style = markdown_compute_style_after("> Second line", 13, style);
+  ASSERT((style & 0x02) == 0);
+
+  PASS();
+}
+
+TEST(markdown_blockquote_nested) {
+  markdown_init_colors();
+
+  unsigned style = markdown_compute_style_after("> > Nested quote", 16, 0);
+  ASSERT((style & 0x02) == 0);
+
+  PASS();
+}
+
+TEST(markdown_blockquote_with_formatting) {
+  markdown_init_colors();
+
+  unsigned style = markdown_compute_style_after("> Quote with **bold**", 20, 0);
+  ASSERT((style & 0x02) == 0);
+
+  style = markdown_compute_style_after("> Quote with *italic*", 21, 0);
+  ASSERT((style & 0x02) == 0);
+
+  PASS();
+}
+
 void run_robustness_tests(void) {
   TEST_SUITE("Robustness Tests");
   RUN_TEST(robust_history_very_long_message);
@@ -1649,4 +1690,8 @@ void run_robustness_tests(void) {
   RUN_TEST(markdown_header_h6);
   RUN_TEST(markdown_header_not_header);
   RUN_TEST(markdown_header_with_formatting);
+  RUN_TEST(markdown_blockquote_basic);
+  RUN_TEST(markdown_blockquote_multiline);
+  RUN_TEST(markdown_blockquote_nested);
+  RUN_TEST(markdown_blockquote_with_formatting);
 }
