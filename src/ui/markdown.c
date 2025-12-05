@@ -390,11 +390,21 @@ static int detect_list_item(const char *text, size_t len,
     return 0;
 
   char marker = text[i];
-  if ((marker == '-' || marker == '*' || marker == '+') && i + 1 < len &&
-      (text[i + 1] == ' ' || text[i + 1] == '\t')) {
-    if (indent_level)
-      *indent_level = indent;
-    return 1;
+  if ((marker == '-' || marker == '*' || marker == '+') && i + 1 < len) {
+    if (text[i + 1] == '[' && i + 3 < len) {
+      if (text[i + 2] == ' ' || text[i + 2] == 'x' || text[i + 2] == 'X') {
+        if (text[i + 3] == ']' &&
+            (i + 4 >= len || text[i + 4] == ' ' || text[i + 4] == '\t')) {
+          if (indent_level)
+            *indent_level = indent;
+          return 3;
+        }
+      }
+    } else if (text[i + 1] == ' ' || text[i + 1] == '\t') {
+      if (indent_level)
+        *indent_level = indent;
+      return 1;
+    }
   }
 
   if (marker >= '0' && marker <= '9') {
@@ -492,6 +502,42 @@ static void render_rp_text(RenderCtx *ctx, const char *text, size_t len) {
           }
         }
         i++;
+        if (i < len && (text[i] == ' ' || text[i] == '\t'))
+          i++;
+      } else if (list_type == 3) {
+        if (ctx->cursor < ctx->max_width) {
+          for (size_t j = 0; j < list_indent && ctx->cursor < ctx->max_width;
+               j++) {
+            mvwaddch(ctx->win, ctx->row, ctx->start_col + ctx->cursor, ' ');
+            ctx->cursor++;
+          }
+          bool is_checked = false;
+          if (i < len && (text[i] == '-' || text[i] == '*' || text[i] == '+')) {
+            if (i + 1 < len && text[i + 1] == '[') {
+              if (i + 2 < len && (text[i + 2] == 'x' || text[i + 2] == 'X')) {
+                is_checked = true;
+              }
+            }
+          }
+          if (is_checked) {
+            mvwaddstr(ctx->win, ctx->row, ctx->start_col + ctx->cursor, "☑");
+          } else {
+            mvwaddstr(ctx->win, ctx->row, ctx->start_col + ctx->cursor, "☐");
+          }
+          ctx->cursor++;
+          if (ctx->cursor < ctx->max_width) {
+            mvwaddch(ctx->win, ctx->row, ctx->start_col + ctx->cursor, ' ');
+            ctx->cursor++;
+          }
+        }
+        i++;
+        if (i < len && text[i] == '[') {
+          i++;
+          if (i < len && (text[i] == ' ' || text[i] == 'x' || text[i] == 'X'))
+            i++;
+          if (i < len && text[i] == ']')
+            i++;
+        }
         if (i < len && (text[i] == ' ' || text[i] == '\t'))
           i++;
       } else if (list_type == 2) {

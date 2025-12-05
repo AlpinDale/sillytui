@@ -1570,6 +1570,53 @@ TEST(markdown_blockquote_with_formatting) {
   PASS();
 }
 
+TEST(markdown_task_list_unchecked) {
+  markdown_init_colors();
+
+  unsigned style = markdown_compute_style_after("- [ ] Task item", 15, 0);
+  ASSERT((style & 0x02) == 0);
+
+  PASS();
+}
+
+TEST(markdown_task_list_checked) {
+  markdown_init_colors();
+
+  unsigned style = markdown_compute_style_after("- [x] Completed task", 20, 0);
+  ASSERT((style & 0x02) == 0);
+
+  PASS();
+}
+
+TEST(markdown_task_list_checked_uppercase) {
+  markdown_init_colors();
+
+  unsigned style = markdown_compute_style_after("- [X] Completed task", 20, 0);
+  ASSERT((style & 0x02) == 0);
+
+  PASS();
+}
+
+TEST(markdown_task_list_multiple) {
+  markdown_init_colors();
+
+  unsigned style1 = markdown_compute_style_after("- [ ] First task", 16, 0);
+  unsigned style2 = markdown_compute_style_after("- [x] Second task", 18, 0);
+  ASSERT((style1 & 0x02) == 0);
+  ASSERT((style2 & 0x02) == 0);
+
+  PASS();
+}
+
+TEST(markdown_task_list_nested) {
+  markdown_init_colors();
+
+  unsigned style = markdown_compute_style_after("  - [ ] Nested task", 19, 0);
+  ASSERT((style & 0x02) == 0);
+
+  PASS();
+}
+
 void run_robustness_tests(void) {
   TEST_SUITE("Robustness Tests");
   RUN_TEST(robust_history_very_long_message);
@@ -1694,4 +1741,9 @@ void run_robustness_tests(void) {
   RUN_TEST(markdown_blockquote_multiline);
   RUN_TEST(markdown_blockquote_nested);
   RUN_TEST(markdown_blockquote_with_formatting);
+  RUN_TEST(markdown_task_list_unchecked);
+  RUN_TEST(markdown_task_list_checked);
+  RUN_TEST(markdown_task_list_checked_uppercase);
+  RUN_TEST(markdown_task_list_multiple);
+  RUN_TEST(markdown_task_list_nested);
 }

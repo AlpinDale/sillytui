@@ -212,6 +212,9 @@ typedef struct {
 
 static bool is_list_marker(const char *p) {
   if (*p == '-' || *p == '*' || *p == '+') {
+    if (p[1] == '[' && (p[2] == ' ' || p[2] == 'x' || p[2] == 'X') &&
+        p[3] == ']' && (p[4] == ' ' || p[4] == '\t' || p[4] == '\0'))
+      return true;
     if (p[1] == ' ' || p[1] == '\t')
       return true;
   }
@@ -251,10 +254,17 @@ static int wrap_text(const char *text, int width, WrappedLine *out,
         is_list_item = true;
         list_line_start = p;
         p = after_spaces;
-        while (*p && *p != '\n' && *p != ' ' && *p != '\t')
-          p++;
-        if (*p == ' ' || *p == '\t')
-          p++;
+        if (p[1] == '[' && (p[2] == ' ' || p[2] == 'x' || p[2] == 'X') &&
+            p[3] == ']' && (p[4] == ' ' || p[4] == '\t' || p[4] == '\0')) {
+          p += 5;
+          if (*p == ' ' || *p == '\t')
+            p++;
+        } else {
+          while (*p && *p != '\n' && *p != ' ' && *p != '\t')
+            p++;
+          if (*p == ' ' || *p == '\t')
+            p++;
+        }
         line_start = p;
       } else {
         while (*p == ' ')
