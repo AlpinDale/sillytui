@@ -210,6 +210,24 @@ typedef struct {
   int len;
 } WrappedLine;
 
+static bool is_list_marker(const char *p) {
+  if (*p == '-' || *p == '*' || *p == '+') {
+    if (p[1] == '[' && (p[2] == ' ' || p[2] == 'x' || p[2] == 'X') &&
+        p[3] == ']' && (p[4] == ' ' || p[4] == '\t' || p[4] == '\0'))
+      return true;
+    if (p[1] == ' ' || p[1] == '\t')
+      return true;
+  }
+  if (*p >= '0' && *p <= '9') {
+    const char *num_end = p;
+    while (*num_end >= '0' && *num_end <= '9')
+      num_end++;
+    if (*num_end == '.' && (num_end[1] == ' ' || num_end[1] == '\t'))
+      return true;
+  }
+  return false;
+}
+
 static int wrap_text(const char *text, int width, WrappedLine *out,
                      int max_lines) {
   if (!text || width <= 0 || !out || max_lines <= 0)
@@ -220,23 +238,42 @@ static int wrap_text(const char *text, int width, WrappedLine *out,
   bool in_code_block = false;
 
   while (*p && line_count < max_lines) {
-    // Track code block state by looking for triple backticks
     if (p[0] == '`' && p[1] == '`' && p[2] == '`') {
       in_code_block = !in_code_block;
-      // Don't skip the backticks, they'll be part of the line
     }
 
-    // In code blocks, preserve leading whitespace
-    // Otherwise, skip leading spaces for normal text wrapping
     const char *line_start = p;
+    bool is_list_item = false;
+    const char *list_line_start = NULL;
+
     if (!in_code_block) {
-      while (*p == ' ')
-        p++;
-      if (!*p)
-        break;
-      line_start = p;
+      const char *after_spaces = p;
+      while (*after_spaces == ' ' || *after_spaces == '\t')
+        after_spaces++;
+      if (is_list_marker(after_spaces)) {
+        is_list_item = true;
+        list_line_start = p;
+        p = after_spaces;
+        if (p[1] == '[' && (p[2] == ' ' || p[2] == 'x' || p[2] == 'X') &&
+            p[3] == ']' && (p[4] == ' ' || p[4] == '\t' || p[4] == '\0')) {
+          p += 5;
+          if (*p == ' ' || *p == '\t')
+            p++;
+        } else {
+          while (*p && *p != '\n' && *p != ' ' && *p != '\t')
+            p++;
+          if (*p == ' ' || *p == '\t')
+            p++;
+        }
+        line_start = p;
+      } else {
+        while (*p == ' ')
+          p++;
+        if (!*p)
+          break;
+        line_start = p;
+      }
     } else {
-      // In code block: preserve leading whitespace, but skip if line is empty
       if (*p == '\n') {
         p++;
         continue;
@@ -245,9 +282,9 @@ static int wrap_text(const char *text, int width, WrappedLine *out,
 
     const char *last_break = NULL;
     int col = 0;
-    const char *scan = p;
+    const char *scan = line_start;
+    bool is_hard_break = false;
 
-    // Count columns, preserving spaces in code blocks
     while (*scan && *scan != '\n' && col < width) {
       if (*scan == ' ') {
         if (!in_code_block)
@@ -257,27 +294,46 @@ static int wrap_text(const char *text, int width, WrappedLine *out,
       col++;
     }
 
+    if (*scan == '\n') {
+      if (scan > line_start + 1 && scan[-1] == ' ' && scan[-2] == ' ') {
+        is_hard_break = true;
+      } else if (scan > line_start && scan[-1] == '\\') {
+        is_hard_break = true;
+      }
+    }
+
     int line_len;
     if (!*scan || *scan == '\n') {
       line_len = (int)(scan - line_start);
+      if (is_hard_break) {
+        if (line_len >= 2 && line_start[line_len - 1] == ' ' &&
+            line_start[line_len - 2] == ' ') {
+          line_len -= 2;
+        } else if (line_len >= 1 && line_start[line_len - 1] == '\\') {
+          line_len -= 1;
+        }
+      }
       if (*scan == '\n')
         scan++;
       p = scan;
-    } else if (!in_code_block && last_break && last_break > line_start) {
-      // Normal text: break at word boundary
+    } else if (!in_code_block && last_break && last_break > line_start &&
+               !is_hard_break) {
       line_len = (int)(last_break - line_start);
       p = last_break + 1;
-      // Skip spaces after the break
       while (*p == ' ')
         p++;
     } else {
-      // Code block or no break found: use full width
       line_len = (int)(scan - line_start);
       p = scan;
     }
 
-    out[line_count].start = line_start;
-    out[line_count].len = line_len;
+    if (is_list_item && list_line_start) {
+      out[line_count].start = list_line_start;
+      out[line_count].len = line_len + (line_start - list_line_start);
+    } else {
+      out[line_count].start = line_start;
+      out[line_count].len = line_len;
+    }
     line_count++;
   }
 

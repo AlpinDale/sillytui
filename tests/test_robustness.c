@@ -1125,18 +1125,494 @@ TEST(markdown_code_block_inline_code) {
 TEST(markdown_code_block_whitespace_preservation) {
   markdown_init_colors();
 
-  // Test that whitespace is preserved in code blocks
-  // This is tested via the wrap_text function, but we can test style
-  // computation
-  unsigned style = 0x20; // In code block
+  unsigned style = 0x20;
 
-  // Line with leading spaces
   style = markdown_compute_style_after("    def f():", 12, style);
-  ASSERT((style & 0x20) != 0); // Still in code block
+  ASSERT((style & 0x20) != 0);
 
-  // Empty line
   style = markdown_compute_style_after("", 0, style);
-  ASSERT((style & 0x20) != 0); // Still in code block
+  ASSERT((style & 0x20) != 0);
+
+  PASS();
+}
+
+TEST(markdown_strikethrough_basic) {
+  markdown_init_colors();
+
+  unsigned style = markdown_compute_style_after("~~deleted~~", 11, 0);
+  ASSERT((style & 0x40) == 0);
+
+  style = markdown_compute_style_after("~~text", 6, 0);
+  ASSERT((style & 0x40) != 0);
+
+  style = markdown_compute_style_after("~~", 2, style);
+  ASSERT((style & 0x40) == 0);
+
+  PASS();
+}
+
+TEST(markdown_strikethrough_multiple) {
+  markdown_init_colors();
+
+  unsigned style = markdown_compute_style_after("~~first~~", 9, 0);
+  ASSERT((style & 0x40) == 0);
+  style = markdown_compute_style_after(" and ~~second~~", 15, style);
+  ASSERT((style & 0x40) == 0);
+
+  PASS();
+}
+
+TEST(markdown_strikethrough_nested) {
+  markdown_init_colors();
+
+  unsigned style = markdown_compute_style_after("**bold", 6, 0);
+  ASSERT((style & 0x04) != 0);
+  style = markdown_compute_style_after(" ~~strike~~ ", 13, style);
+  ASSERT((style & 0x04) != 0);
+  ASSERT((style & 0x40) == 0);
+  style = markdown_compute_style_after(" bold**", 7, style);
+  ASSERT((style & 0x04) == 0);
+  ASSERT((style & 0x40) == 0);
+
+  PASS();
+}
+
+TEST(markdown_underscore_italic) {
+  markdown_init_colors();
+
+  unsigned style = markdown_compute_style_after("_italic_", 8, 0);
+  ASSERT((style & 0x01) == 0);
+
+  style = markdown_compute_style_after("_text", 5, 0);
+  ASSERT((style & 0x01) != 0);
+
+  style = markdown_compute_style_after("_", 1, style);
+  ASSERT((style & 0x01) == 0);
+
+  PASS();
+}
+
+TEST(markdown_underscore_bold) {
+  markdown_init_colors();
+
+  unsigned style = markdown_compute_style_after("__bold__", 8, 0);
+  ASSERT((style & 0x04) == 0);
+
+  style = markdown_compute_style_after("__text", 6, 0);
+  ASSERT((style & 0x04) != 0);
+
+  style = markdown_compute_style_after("__", 2, style);
+  ASSERT((style & 0x04) == 0);
+
+  PASS();
+}
+
+TEST(markdown_underscore_vs_asterisk) {
+  markdown_init_colors();
+
+  unsigned style1 = markdown_compute_style_after("*italic*", 9, 0);
+  unsigned style2 = markdown_compute_style_after("_italic_", 8, 0);
+  ASSERT((style1 & 0x01) == (style2 & 0x01));
+
+  style1 = markdown_compute_style_after("**bold**", 8, 0);
+  style2 = markdown_compute_style_after("__bold__", 8, 0);
+  ASSERT((style1 & 0x04) == (style2 & 0x04));
+
+  PASS();
+}
+
+TEST(markdown_links_basic) {
+  markdown_init_colors();
+
+  unsigned style = markdown_compute_style_after("[text](url)", 11, 0);
+  ASSERT((style & 0x08) == 0);
+
+  PASS();
+}
+
+TEST(markdown_links_with_escapes) {
+  markdown_init_colors();
+
+  unsigned style = markdown_compute_style_after("[text\\]](url\\))", 15, 0);
+  ASSERT((style & 0x08) == 0);
+
+  PASS();
+}
+
+TEST(markdown_links_multiple) {
+  markdown_init_colors();
+
+  unsigned style =
+      markdown_compute_style_after("[first](url1) and [second](url2)", 32, 0);
+  ASSERT((style & 0x08) == 0);
+
+  PASS();
+}
+
+TEST(markdown_horizontal_rule_dashes) {
+  markdown_init_colors();
+
+  unsigned style = markdown_compute_style_after("---", 3, 0);
+  ASSERT((style & 0x20) == 0);
+
+  style = markdown_compute_style_after("----", 4, 0);
+  ASSERT((style & 0x20) == 0);
+
+  PASS();
+}
+
+TEST(markdown_horizontal_rule_stars) {
+  markdown_init_colors();
+
+  unsigned style = markdown_compute_style_after("***", 3, 0);
+  ASSERT((style & 0x20) == 0);
+
+  PASS();
+}
+
+TEST(markdown_horizontal_rule_underscores) {
+  markdown_init_colors();
+
+  unsigned style = markdown_compute_style_after("___", 3, 0);
+  ASSERT((style & 0x20) == 0);
+
+  PASS();
+}
+
+TEST(markdown_escape_asterisk) {
+  markdown_init_colors();
+
+  unsigned style = markdown_compute_style_after("\\*not italic\\*", 15, 0);
+  ASSERT((style & 0x01) == 0);
+
+  PASS();
+}
+
+TEST(markdown_escape_underscore) {
+  markdown_init_colors();
+
+  unsigned style = markdown_compute_style_after("\\_not italic\\_", 15, 0);
+  ASSERT((style & 0x01) == 0);
+
+  PASS();
+}
+
+TEST(markdown_escape_tilde) {
+  markdown_init_colors();
+
+  unsigned style =
+      markdown_compute_style_after("\\~\\~not strikethrough", 21, 0);
+  ASSERT((style & 0x40) == 0);
+
+  PASS();
+}
+
+TEST(markdown_escape_backtick) {
+  markdown_init_colors();
+
+  unsigned style = markdown_compute_style_after("\\`not code\\`", 13, 0);
+  ASSERT((style & 0x10) == 0);
+
+  PASS();
+}
+
+TEST(markdown_escape_brackets) {
+  markdown_init_colors();
+
+  unsigned style = markdown_compute_style_after("\\[not link\\]", 13, 0);
+  ASSERT((style & 0x08) == 0);
+
+  PASS();
+}
+
+TEST(markdown_escape_backslash) {
+  markdown_init_colors();
+
+  unsigned style = markdown_compute_style_after("\\\\", 2, 0);
+  ASSERT((style & 0x01) == 0);
+
+  PASS();
+}
+
+TEST(markdown_nested_bold_italic) {
+  markdown_init_colors();
+
+  unsigned style =
+      markdown_compute_style_after("**bold _italic_ bold**", 23, 0);
+  ASSERT((style & 0x04) == 0);
+  ASSERT((style & 0x01) == 0);
+
+  PASS();
+}
+
+TEST(markdown_nested_italic_bold) {
+  markdown_init_colors();
+
+  unsigned style =
+      markdown_compute_style_after("*italic **bold** italic*", 25, 0);
+  ASSERT((style & 0x01) == 0);
+  ASSERT((style & 0x04) == 0);
+
+  PASS();
+}
+
+TEST(markdown_nested_strikethrough_bold) {
+  markdown_init_colors();
+
+  unsigned style = markdown_compute_style_after("**bold", 6, 0);
+  ASSERT((style & 0x04) != 0);
+  style = markdown_compute_style_after(" ~~strike~~ ", 13, style);
+  ASSERT((style & 0x04) != 0);
+  ASSERT((style & 0x40) == 0);
+  style = markdown_compute_style_after(" bold**", 7, style);
+  ASSERT((style & 0x04) == 0);
+  ASSERT((style & 0x40) == 0);
+
+  PASS();
+}
+
+TEST(markdown_nested_all_styles) {
+  markdown_init_colors();
+
+  unsigned style = markdown_compute_style_after("**bold", 6, 0);
+  ASSERT((style & 0x04) != 0);
+  style = markdown_compute_style_after(" _italic", 8, style);
+  ASSERT((style & 0x04) != 0);
+  ASSERT((style & 0x01) != 0);
+  style = markdown_compute_style_after(" ~~strike~~ ", 13, style);
+  ASSERT((style & 0x04) != 0);
+  ASSERT((style & 0x01) != 0);
+  ASSERT((style & 0x40) == 0);
+  style = markdown_compute_style_after(" italic_ ", 9, style);
+  ASSERT((style & 0x04) != 0);
+  ASSERT((style & 0x01) == 0);
+  style = markdown_compute_style_after(" bold**", 7, style);
+  ASSERT((style & 0x04) == 0);
+  ASSERT((style & 0x01) == 0);
+  ASSERT((style & 0x40) == 0);
+
+  PASS();
+}
+
+TEST(markdown_code_blocks_ignore_markdown) {
+  markdown_init_colors();
+
+  unsigned style = 0x20;
+  style = markdown_compute_style_after("**bold** _italic_", 18, style);
+  ASSERT((style & 0x20) != 0);
+  ASSERT((style & 0x04) == 0);
+  ASSERT((style & 0x01) == 0);
+
+  PASS();
+}
+
+TEST(markdown_inline_code_ignore_markdown) {
+  markdown_init_colors();
+
+  unsigned style = markdown_compute_style_after("`**bold** _italic_`", 19, 0);
+  ASSERT((style & 0x10) == 0);
+  ASSERT((style & 0x04) == 0);
+  ASSERT((style & 0x01) == 0);
+
+  PASS();
+}
+
+TEST(markdown_url_auto_detection) {
+  markdown_init_colors();
+
+  unsigned style = markdown_compute_style_after("https://example.com", 19, 0);
+  ASSERT((style & 0x08) == 0);
+
+  style = markdown_compute_style_after("http://example.com", 18, 0);
+  ASSERT((style & 0x08) == 0);
+
+  style = markdown_compute_style_after("www.example.com", 15, 0);
+  ASSERT((style & 0x08) == 0);
+
+  PASS();
+}
+
+TEST(markdown_quotes_basic) {
+  markdown_init_colors();
+
+  unsigned style = markdown_compute_style_after("\"quoted\"", 9, 0);
+  ASSERT((style & 0x02) == 0);
+
+  style = markdown_compute_style_after("\"text", 5, 0);
+  ASSERT((style & 0x02) != 0);
+
+  style = markdown_compute_style_after("\"", 1, style);
+  ASSERT((style & 0x02) == 0);
+
+  PASS();
+}
+
+TEST(markdown_triple_asterisk_bold_italic) {
+  markdown_init_colors();
+
+  unsigned style = markdown_compute_style_after("***bold italic***", 17, 0);
+  ASSERT((style & 0x04) == 0);
+  ASSERT((style & 0x01) == 0);
+
+  style = markdown_compute_style_after("***text", 7, 0);
+  ASSERT((style & 0x04) != 0);
+  ASSERT((style & 0x01) != 0);
+
+  style = markdown_compute_style_after("***", 3, style);
+  ASSERT((style & 0x04) == 0);
+  ASSERT((style & 0x01) == 0);
+
+  PASS();
+}
+
+TEST(markdown_header_h1) {
+  markdown_init_colors();
+
+  unsigned style = markdown_compute_style_after("# Header 1", 10, 0);
+  ASSERT((style & 0x04) != 0);
+
+  PASS();
+}
+
+TEST(markdown_header_h2) {
+  markdown_init_colors();
+
+  unsigned style = markdown_compute_style_after("## Header 2", 11, 0);
+  ASSERT((style & 0x04) != 0);
+
+  PASS();
+}
+
+TEST(markdown_header_h3) {
+  markdown_init_colors();
+
+  unsigned style = markdown_compute_style_after("### Header 3", 12, 0);
+  ASSERT((style & 0x04) != 0);
+
+  PASS();
+}
+
+TEST(markdown_header_h6) {
+  markdown_init_colors();
+
+  unsigned style = markdown_compute_style_after("###### Header 6", 15, 0);
+  ASSERT((style & 0x04) != 0);
+
+  PASS();
+}
+
+TEST(markdown_header_not_header) {
+  markdown_init_colors();
+
+  unsigned style1 = markdown_compute_style_after("#not a header", 13, 0);
+  ASSERT((style1 & 0x04) == 0);
+
+  unsigned style2 = markdown_compute_style_after("##not a header", 14, 0);
+  ASSERT((style2 & 0x04) == 0);
+
+  unsigned style3 = markdown_compute_style_after("text # not header", 17, 0);
+  ASSERT((style3 & 0x04) == 0);
+
+  PASS();
+}
+
+TEST(markdown_header_with_formatting) {
+  markdown_init_colors();
+
+  unsigned style =
+      markdown_compute_style_after("# Header with **bold**", 22, 0);
+  ASSERT((style & 0x04) != 0);
+
+  style = markdown_compute_style_after("## Header with *italic*", 23, 0);
+  ASSERT((style & 0x04) != 0);
+
+  PASS();
+}
+
+TEST(markdown_blockquote_basic) {
+  markdown_init_colors();
+
+  unsigned style = markdown_compute_style_after("> Quote text", 12, 0);
+  ASSERT((style & 0x02) == 0);
+
+  PASS();
+}
+
+TEST(markdown_blockquote_multiline) {
+  markdown_init_colors();
+
+  unsigned style = markdown_compute_style_after("> First line", 12, 0);
+  ASSERT((style & 0x02) == 0);
+  style = markdown_compute_style_after("> Second line", 13, style);
+  ASSERT((style & 0x02) == 0);
+
+  PASS();
+}
+
+TEST(markdown_blockquote_nested) {
+  markdown_init_colors();
+
+  unsigned style = markdown_compute_style_after("> > Nested quote", 16, 0);
+  ASSERT((style & 0x02) == 0);
+
+  PASS();
+}
+
+TEST(markdown_blockquote_with_formatting) {
+  markdown_init_colors();
+
+  unsigned style = markdown_compute_style_after("> Quote with **bold**", 20, 0);
+  ASSERT((style & 0x02) == 0);
+
+  style = markdown_compute_style_after("> Quote with *italic*", 21, 0);
+  ASSERT((style & 0x02) == 0);
+
+  PASS();
+}
+
+TEST(markdown_task_list_unchecked) {
+  markdown_init_colors();
+
+  unsigned style = markdown_compute_style_after("- [ ] Task item", 15, 0);
+  ASSERT((style & 0x02) == 0);
+
+  PASS();
+}
+
+TEST(markdown_task_list_checked) {
+  markdown_init_colors();
+
+  unsigned style = markdown_compute_style_after("- [x] Completed task", 20, 0);
+  ASSERT((style & 0x02) == 0);
+
+  PASS();
+}
+
+TEST(markdown_task_list_checked_uppercase) {
+  markdown_init_colors();
+
+  unsigned style = markdown_compute_style_after("- [X] Completed task", 20, 0);
+  ASSERT((style & 0x02) == 0);
+
+  PASS();
+}
+
+TEST(markdown_task_list_multiple) {
+  markdown_init_colors();
+
+  unsigned style1 = markdown_compute_style_after("- [ ] First task", 16, 0);
+  unsigned style2 = markdown_compute_style_after("- [x] Second task", 18, 0);
+  ASSERT((style1 & 0x02) == 0);
+  ASSERT((style2 & 0x02) == 0);
+
+  PASS();
+}
+
+TEST(markdown_task_list_nested) {
+  markdown_init_colors();
+
+  unsigned style = markdown_compute_style_after("  - [ ] Nested task", 19, 0);
+  ASSERT((style & 0x02) == 0);
 
   PASS();
 }
@@ -1228,4 +1704,46 @@ void run_robustness_tests(void) {
   RUN_TEST(markdown_code_block_multiline);
   RUN_TEST(markdown_code_block_inline_code);
   RUN_TEST(markdown_code_block_whitespace_preservation);
+  RUN_TEST(markdown_strikethrough_basic);
+  RUN_TEST(markdown_strikethrough_multiple);
+  RUN_TEST(markdown_strikethrough_nested);
+  RUN_TEST(markdown_underscore_italic);
+  RUN_TEST(markdown_underscore_bold);
+  RUN_TEST(markdown_underscore_vs_asterisk);
+  RUN_TEST(markdown_links_basic);
+  RUN_TEST(markdown_links_with_escapes);
+  RUN_TEST(markdown_links_multiple);
+  RUN_TEST(markdown_horizontal_rule_dashes);
+  RUN_TEST(markdown_horizontal_rule_stars);
+  RUN_TEST(markdown_horizontal_rule_underscores);
+  RUN_TEST(markdown_escape_asterisk);
+  RUN_TEST(markdown_escape_underscore);
+  RUN_TEST(markdown_escape_tilde);
+  RUN_TEST(markdown_escape_backtick);
+  RUN_TEST(markdown_escape_brackets);
+  RUN_TEST(markdown_escape_backslash);
+  RUN_TEST(markdown_nested_bold_italic);
+  RUN_TEST(markdown_nested_italic_bold);
+  RUN_TEST(markdown_nested_strikethrough_bold);
+  RUN_TEST(markdown_nested_all_styles);
+  RUN_TEST(markdown_code_blocks_ignore_markdown);
+  RUN_TEST(markdown_inline_code_ignore_markdown);
+  RUN_TEST(markdown_url_auto_detection);
+  RUN_TEST(markdown_quotes_basic);
+  RUN_TEST(markdown_triple_asterisk_bold_italic);
+  RUN_TEST(markdown_header_h1);
+  RUN_TEST(markdown_header_h2);
+  RUN_TEST(markdown_header_h3);
+  RUN_TEST(markdown_header_h6);
+  RUN_TEST(markdown_header_not_header);
+  RUN_TEST(markdown_header_with_formatting);
+  RUN_TEST(markdown_blockquote_basic);
+  RUN_TEST(markdown_blockquote_multiline);
+  RUN_TEST(markdown_blockquote_nested);
+  RUN_TEST(markdown_blockquote_with_formatting);
+  RUN_TEST(markdown_task_list_unchecked);
+  RUN_TEST(markdown_task_list_checked);
+  RUN_TEST(markdown_task_list_checked_uppercase);
+  RUN_TEST(markdown_task_list_multiple);
+  RUN_TEST(markdown_task_list_nested);
 }
