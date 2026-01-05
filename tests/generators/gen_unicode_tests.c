@@ -55,7 +55,7 @@ static const UnicodeRange RANGES[] = {
 
 int main(void) {
   printf("#include \"test_framework.h\"\n");
-  printf("#include \"tokenizer/tiktoken.h\"\n\n");
+  printf("#include \"inference/tokenizer/tiktoken.h\"\n\n");
 
   printf("TEST(unicode_letter_boundary_low) {\n");
   printf("  ASSERT_FALSE(unicode_is_letter(0x0000));\n");

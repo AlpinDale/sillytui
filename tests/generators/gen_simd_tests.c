@@ -3,7 +3,7 @@
 
 int main(void) {
   printf("#include \"test_framework.h\"\n");
-  printf("#include \"tokenizer/simd.h\"\n");
+  printf("#include \"inference/tokenizer/simd.h\"\n");
   printf("#include <stdlib.h>\n");
   printf("#include <string.h>\n\n");
 

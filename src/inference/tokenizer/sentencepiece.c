@@ -1,5 +1,5 @@
-#include "tokenizer/sentencepiece.h"
-#include "tokenizer/simd.h"
+#include "inference/tokenizer/sentencepiece.h"
+#include "inference/tokenizer/simd.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

@@ -3,7 +3,7 @@
 
 int main(void) {
   printf("#include \"test_framework.h\"\n");
-  printf("#include \"tokenizer/tiktoken.h\"\n");
+  printf("#include \"inference/tokenizer/tiktoken.h\"\n");
   printf("#include \"chat/history.h\"\n");
   printf("#include \"core/config.h\"\n");
   printf("#include <stdlib.h>\n");

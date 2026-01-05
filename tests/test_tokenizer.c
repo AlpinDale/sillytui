@@ -1,5 +1,5 @@
+#include "inference/tokenizer/tiktoken.h"
 #include "test_framework.h"
-#include "tokenizer/tiktoken.h"
 
 TEST(tokenizer_init_sets_defaults) {
   Tokenizer tok;

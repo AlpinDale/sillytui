@@ -1,5 +1,5 @@
+#include "inference/tokenizer/simd.h"
 #include "test_framework.h"
-#include "tokenizer/simd.h"
 
 TEST(simd_init_no_crash) {
   simd_init();

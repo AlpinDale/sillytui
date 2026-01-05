@@ -4,7 +4,7 @@
 
 int main(void) {
   printf("#include \"test_framework.h\"\n");
-  printf("#include \"tokenizer/tiktoken.h\"\n\n");
+  printf("#include \"inference/tokenizer/tiktoken.h\"\n\n");
 
   printf("TEST(utf8_decode_empty_buffer) {\n");
   printf("  uint32_t cp;\n");

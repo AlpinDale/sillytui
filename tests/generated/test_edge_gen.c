@@ -1,7 +1,7 @@
 #include "chat/history.h"
 #include "core/config.h"
+#include "inference/tokenizer/tiktoken.h"
 #include "test_framework.h"
-#include "tokenizer/tiktoken.h"
 #include <limits.h>
 #include <stdlib.h>
 #include <string.h>

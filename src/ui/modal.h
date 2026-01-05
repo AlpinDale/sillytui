@@ -5,8 +5,8 @@
 #include "character/persona.h"
 #include "chat/chat.h"
 #include "core/config.h"
+#include "inference/tokenizer/selector.h"
 #include "llm/sampler.h"
-#include "tokenizer/selector.h"
 #include <curses.h>
 #include <stdbool.h>
 

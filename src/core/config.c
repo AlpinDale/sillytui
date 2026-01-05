@@ -1,5 +1,5 @@
 #include "core/config.h"
-#include "tokenizer/selector.h"
+#include "inference/tokenizer/selector.h"
 #include <errno.h>
 #include <pwd.h>
 #include <stdio.h>

@@ -1,4 +1,4 @@
-#include "tokenizer/simd.h"
+#include "inference/tokenizer/simd.h"
 #include <string.h>
 
 #if SIMD_ARM64

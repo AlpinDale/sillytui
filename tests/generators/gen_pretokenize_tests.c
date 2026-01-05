@@ -142,7 +142,7 @@ static const TestCase CASES[] = {
 
 int main(void) {
   printf("#include \"test_framework.h\"\n");
-  printf("#include \"tokenizer/tiktoken.h\"\n");
+  printf("#include \"inference/tokenizer/tiktoken.h\"\n");
   printf("#include <stdlib.h>\n");
   printf("#include <string.h>\n\n");
 

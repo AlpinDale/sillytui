@@ -2,8 +2,8 @@
 #include "chat/history.h"
 #include "core/config.h"
 #include "core/macros.h"
+#include "inference/tokenizer/tiktoken.h"
 #include "llm/sampler.h"
-#include "tokenizer/tiktoken.h"
 
 TEST(boundary_history_empty_message) {
   ChatHistory h;

@@ -72,20 +72,20 @@ set(SOURCES
     src/character/character.c
     src/character/persona.c
     src/lore/lorebook.c
-    src/tokenizer/tiktoken.c
-    src/tokenizer/sentencepiece.c
-    src/tokenizer/gpt2bpe.c
-    src/tokenizer/selector.c
-    src/tokenizer/simd.c
-    src/tokenizer/unicode_tables.c
+    src/inference/tokenizer/tiktoken.c
+    src/inference/tokenizer/sentencepiece.c
+    src/inference/tokenizer/gpt2bpe.c
+    src/inference/tokenizer/selector.c
+    src/inference/tokenizer/simd.c
+    src/inference/tokenizer/unicode_tables.c
 )
 
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "arm64|aarch64")
     enable_language(ASM)
-    list(APPEND SOURCES src/tokenizer/simd_arm64.S)
+    list(APPEND SOURCES src/inference/tokenizer/simd_arm64.S)
 elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
     enable_language(ASM)
-    list(APPEND SOURCES src/tokenizer/simd_x86_64.S)
+    list(APPEND SOURCES src/inference/tokenizer/simd_x86_64.S)
 endif()
 
 add_executable(sillytui ${SOURCES} ${ULIGHT_SOURCES})
@@ -119,12 +119,12 @@ set(TEST_SOURCES
     src/llm/backends/openai.c
     src/llm/backends/anthropic.c
     src/llm/backends/kobold.c
-    src/tokenizer/tiktoken.c
-    src/tokenizer/simd.c
-    src/tokenizer/unicode_tables.c
-    src/tokenizer/selector.c
-    src/tokenizer/gpt2bpe.c
-    src/tokenizer/sentencepiece.c
+    src/inference/tokenizer/tiktoken.c
+    src/inference/tokenizer/simd.c
+    src/inference/tokenizer/unicode_tables.c
+    src/inference/tokenizer/selector.c
+    src/inference/tokenizer/gpt2bpe.c
+    src/inference/tokenizer/sentencepiece.c
     src/ui/modal.c
     src/ui/ui.c
     src/ui/markdown.c
@@ -139,9 +139,9 @@ set(TEST_SOURCES
 )
 
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "arm64|aarch64")
-    list(APPEND TEST_SOURCES src/tokenizer/simd_arm64.S)
+    list(APPEND TEST_SOURCES src/inference/tokenizer/simd_arm64.S)
 elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
-    list(APPEND TEST_SOURCES src/tokenizer/simd_x86_64.S)
+    list(APPEND TEST_SOURCES src/inference/tokenizer/simd_x86_64.S)
 endif()
 
 add_executable(run_tests ${TEST_SOURCES} ${ULIGHT_SOURCES})
@@ -169,12 +169,12 @@ set(INTEGRATION_TEST_SOURCES
     src/llm/sampler.c
     src/character/character.c
     src/character/persona.c
-    src/tokenizer/tiktoken.c
-    src/tokenizer/gpt2bpe.c
-    src/tokenizer/sentencepiece.c
-    src/tokenizer/simd.c
-    src/tokenizer/unicode_tables.c
-    src/tokenizer/selector.c
+    src/inference/tokenizer/tiktoken.c
+    src/inference/tokenizer/gpt2bpe.c
+    src/inference/tokenizer/sentencepiece.c
+    src/inference/tokenizer/simd.c
+    src/inference/tokenizer/unicode_tables.c
+    src/inference/tokenizer/selector.c
     src/ui/modal.c
     src/ui/ui.c
     src/ui/markdown.c
@@ -185,9 +185,9 @@ set(INTEGRATION_TEST_SOURCES
 )
 
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "arm64|aarch64")
-    list(APPEND INTEGRATION_TEST_SOURCES src/tokenizer/simd_arm64.S)
+    list(APPEND INTEGRATION_TEST_SOURCES src/inference/tokenizer/simd_arm64.S)
 elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
-    list(APPEND INTEGRATION_TEST_SOURCES src/tokenizer/simd_x86_64.S)
+    list(APPEND INTEGRATION_TEST_SOURCES src/inference/tokenizer/simd_x86_64.S)
 endif()
 
 add_executable(run_integration_tests ${INTEGRATION_TEST_SOURCES} ${ULIGHT_SOURCES})
@@ -238,12 +238,12 @@ set(ALL_TEST_SOURCES
     src/character/character.c
     src/character/persona.c
     src/lore/lorebook.c
-    src/tokenizer/tiktoken.c
-    src/tokenizer/gpt2bpe.c
-    src/tokenizer/sentencepiece.c
-    src/tokenizer/selector.c
-    src/tokenizer/simd.c
-    src/tokenizer/unicode_tables.c
+    src/inference/tokenizer/tiktoken.c
+    src/inference/tokenizer/gpt2bpe.c
+    src/inference/tokenizer/sentencepiece.c
+    src/inference/tokenizer/selector.c
+    src/inference/tokenizer/simd.c
+    src/inference/tokenizer/unicode_tables.c
     src/ui/modal.c
     src/ui/ui.c
     src/ui/markdown.c
@@ -253,9 +253,9 @@ set(ALL_TEST_SOURCES
 )
 
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "arm64|aarch64")
-    list(APPEND ALL_TEST_SOURCES src/tokenizer/simd_arm64.S)
+    list(APPEND ALL_TEST_SOURCES src/inference/tokenizer/simd_arm64.S)
 elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
-    list(APPEND ALL_TEST_SOURCES src/tokenizer/simd_x86_64.S)
+    list(APPEND ALL_TEST_SOURCES src/inference/tokenizer/simd_x86_64.S)
 endif()
 
 add_executable(run_all_tests ${ALL_TEST_SOURCES} ${ULIGHT_SOURCES})
@@ -292,4 +292,19 @@ add_custom_target(generate_tests
     COMMAND gen_utf8_tests > ${CMAKE_SOURCE_DIR}/tests/generated/test_utf8_gen.c
     COMMAND gen_pretokenize_tests > ${CMAKE_SOURCE_DIR}/tests/generated/test_pretokenize_gen.c
     DEPENDS gen_unicode_tests gen_utf8_tests gen_pretokenize_tests
+)
+
+add_executable(load_model examples/load_model.cc)
+target_include_directories(load_model PRIVATE src)
+set_target_properties(load_model PROPERTIES
+    CXX_STANDARD 11
+    CXX_STANDARD_REQUIRED ON
+)
+target_compile_options(load_model PRIVATE 
+    -fno-rtti 
+    -fno-exceptions 
+    -Wno-ignored-qualifiers 
+    -Wno-unused-parameter 
+    -Wno-unused-variable
+    -Wno-error
 )

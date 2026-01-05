@@ -1,5 +1,5 @@
+#include "inference/tokenizer/tiktoken.h"
 #include "test_framework.h"
-#include "tokenizer/tiktoken.h"
 
 TEST(utf8_decode_empty_buffer) {
   uint32_t cp;

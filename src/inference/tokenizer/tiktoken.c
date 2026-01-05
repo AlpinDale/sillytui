@@ -1,6 +1,6 @@
-#include "tokenizer/tiktoken.h"
-#include "tokenizer/simd.h"
-#include "tokenizer/unicode_tables.h"
+#include "inference/tokenizer/tiktoken.h"
+#include "inference/tokenizer/simd.h"
+#include "inference/tokenizer/unicode_tables.h"
 #include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>

@@ -1,6 +1,6 @@
 #include "common.h"
 #include "core/macros.h"
-#include "tokenizer/selector.h"
+#include "inference/tokenizer/selector.h"
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>

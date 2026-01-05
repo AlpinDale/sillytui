@@ -1,7 +1,7 @@
+#include "inference/tokenizer/simd.h"
+#include "inference/tokenizer/tiktoken.h"
 #include "property_tests.h"
 #include "test_framework.h"
-#include "tokenizer/simd.h"
-#include "tokenizer/tiktoken.h"
 #include <stdlib.h>
 #include <string.h>
 

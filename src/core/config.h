@@ -1,7 +1,7 @@
 #ifndef CONFIG_H
 #define CONFIG_H
 
-#include "tokenizer/selector.h"
+#include "inference/tokenizer/selector.h"
 #include <stdbool.h>
 #include <stddef.h>
 

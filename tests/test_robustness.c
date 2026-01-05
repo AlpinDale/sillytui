@@ -5,9 +5,9 @@
 #include "core/log.h"
 #include "core/macros.h"
 #include "core/time.h"
+#include "inference/tokenizer/tiktoken.h"
 #include "llm/sampler.h"
 #include "test_framework.h"
-#include "tokenizer/tiktoken.h"
 #include "ui/markdown.h"
 #include "ui/ui.h"
 #include <stdlib.h>

@@ -1,9 +1,9 @@
 #include "../test_framework.h"
 #include "chat/history.h"
 #include "core/config.h"
-#include "tokenizer/gpt2bpe.h"
-#include "tokenizer/simd.h"
-#include "tokenizer/tiktoken.h"
+#include "inference/tokenizer/gpt2bpe.h"
+#include "inference/tokenizer/simd.h"
+#include "inference/tokenizer/tiktoken.h"
 #include <time.h>
 
 #define STRESS_ITERATIONS 10000

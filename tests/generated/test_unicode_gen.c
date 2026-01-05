@@ -1,5 +1,5 @@
+#include "inference/tokenizer/tiktoken.h"
 #include "test_framework.h"
-#include "tokenizer/tiktoken.h"
 
 TEST(unicode_letter_boundary_low) {
   ASSERT_FALSE(unicode_is_letter(0x0000));

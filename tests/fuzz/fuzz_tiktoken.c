@@ -1,5 +1,5 @@
-#include "tokenizer/simd.h"
-#include "tokenizer/tiktoken.h"
+#include "inference/tokenizer/simd.h"
+#include "inference/tokenizer/tiktoken.h"
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>

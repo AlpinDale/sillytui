@@ -1,4 +1,4 @@
-#include "tokenizer/gpt2bpe.h"
+#include "inference/tokenizer/gpt2bpe.h"
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>

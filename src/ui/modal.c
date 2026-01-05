@@ -1,6 +1,6 @@
 #include "ui/modal.h"
+#include "inference/tokenizer/selector.h"
 #include "llm/backends/backend.h"
-#include "tokenizer/selector.h"
 #include "ui/ui.h"
 #include <ctype.h>
 #include <curl/curl.h>

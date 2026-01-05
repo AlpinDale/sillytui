@@ -6,9 +6,9 @@
 #include "chat/author_note.h"
 #include "chat/history.h"
 #include "core/config.h"
+#include "inference/tokenizer/selector.h"
 #include "llm/sampler.h"
 #include "lore/lorebook.h"
-#include "tokenizer/selector.h"
 #include <stdbool.h>
 #include <stddef.h>
 #include <sys/time.h>

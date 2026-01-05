@@ -1,8 +1,8 @@
 #include "../test_framework.h"
+#include "inference/tokenizer/gpt2bpe.h"
+#include "inference/tokenizer/simd.h"
+#include "inference/tokenizer/tiktoken.h"
 #include "test_helper.h"
-#include "tokenizer/gpt2bpe.h"
-#include "tokenizer/simd.h"
-#include "tokenizer/tiktoken.h"
 
 #define CL100K_PATH "tokenizers/openai/cl100k_base.tiktoken"
 #define O200K_PATH "tokenizers/openai/o200k_base.tiktoken"
