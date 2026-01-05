@@ -64,3 +64,4 @@ Decoded tokens:
 ## Acknowledgments
 
 - [Kat](https://github.com/Theldus/kat) for C syntax highlighting
+- [ulight](https://github.com/eisenwave/ulight) for general purpose syntax highlighting

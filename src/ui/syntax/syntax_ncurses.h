@@ -28,6 +28,7 @@ void syntax_init_colors(void);
 int syntax_highlight_init(void);
 void syntax_highlight_finish(void);
 void syntax_state_init(SyntaxHighlightState *state);
+void syntax_set_language(const char *lang_name);
 
 void syntax_render_line(WINDOW *win, int row, int col, int max_width,
                         const char *line, SyntaxHighlightState *state);

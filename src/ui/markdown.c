@@ -4,6 +4,7 @@
 #include <ctype.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <wchar.h>
 
 #define STYLE_STACK_MAX 64
@@ -55,7 +56,7 @@ typedef struct {
 } RenderCtx;
 
 static bool g_supports_color = false;
-static bool g_code_block_is_c = false;
+static bool g_code_block_has_syntax = false;
 static SyntaxHighlightState g_syntax_state;
 
 void markdown_init_colors(void) {
@@ -674,7 +675,7 @@ static void render_rp_text(RenderCtx *ctx, const char *text, size_t len) {
         i = len;
         continue;
       }
-      if (g_code_block_is_c && g_supports_color) {
+      if (g_code_block_has_syntax && g_supports_color) {
         syntax_render_line(ctx->win, ctx->row, ctx->start_col + ctx->cursor,
                            ctx->max_width - ctx->cursor, text, &g_syntax_state);
         return;
@@ -905,8 +906,9 @@ unsigned markdown_render_line_bg(WINDOW *win, int row, int start_col, int width,
             // We're in a code block, so these are CLOSING backticks
             code_block_ends = true;
             in_code_block = false;
-            if (g_code_block_is_c) {
-              g_code_block_is_c = false;
+            if (g_code_block_has_syntax) {
+              g_code_block_has_syntax = false;
+              syntax_set_language(NULL);
               syntax_state_init(&g_syntax_state);
             }
 #ifdef DEBUG_MARKDOWN
@@ -921,13 +923,31 @@ unsigned markdown_render_line_bg(WINDOW *win, int row, int start_col, int width,
             const char *lang = p + backticks;
             while (*lang == ' ' || *lang == '\t')
               lang++;
-            if ((*lang == 'c' || *lang == 'C') &&
-                (lang[1] == '\0' || lang[1] == '\n' || lang[1] == '\r' ||
-                 lang[1] == ' ' || lang[1] == '\t')) {
-              g_code_block_is_c = true;
+
+            size_t lang_len = 0;
+            while (lang[lang_len] && lang[lang_len] != '\n' &&
+                   lang[lang_len] != '\r' && lang[lang_len] != ' ' &&
+                   lang[lang_len] != '\t') {
+              lang_len++;
+            }
+
+            if (lang_len > 0) {
+              char lang_name[32];
+              if (lang_len > 31)
+                lang_len = 31;
+              memcpy(lang_name, lang, lang_len);
+              lang_name[lang_len] = '\0';
+
+              for (size_t i = 0; i < lang_len; i++) {
+                lang_name[i] = tolower((unsigned char)lang_name[i]);
+              }
+
+              syntax_set_language(lang_name);
+              g_code_block_has_syntax = true;
               syntax_state_init(&g_syntax_state);
             } else {
-              g_code_block_is_c = false;
+              g_code_block_has_syntax = false;
+              syntax_set_language(NULL);
             }
 #ifdef DEBUG_MARKDOWN
             log_message(LOG_DEBUG, __FILE__, __LINE__,
@@ -970,8 +990,8 @@ unsigned markdown_render_line_bg(WINDOW *win, int row, int start_col, int width,
 
   // Fill background
   if (in_code_block || code_block_starts || code_block_ends) {
-    // Code block background - skip for C syntax highlighted blocks
-    if (g_code_block_is_c) {
+    // Code block background - skip for syntax highlighted blocks
+    if (g_code_block_has_syntax) {
       mvwhline(win, row, start_col, ' ', width);
     } else if (g_supports_color) {
       wattron(win, COLOR_PAIR(MD_PAIR_CODE_BLOCK));
