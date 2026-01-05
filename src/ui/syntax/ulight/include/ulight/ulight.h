@@ -847,7 +847,7 @@ void ulight_delete(ulight_state *state) ULIGHT_NOEXCEPT;
 
 /// @brief Converts the given UTF-8-encoded code in range
 ///`[state->source, state->source + state->source_length)` into an array of
-///tokens,
+/// tokens,
 /// written to the token buffer.
 ///
 /// The token buffer is pointed to by `state->token_buffer`,

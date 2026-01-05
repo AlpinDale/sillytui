@@ -32,6 +32,10 @@ int count_tokens_with_tokenizer(ChatTokenizer *tokenizer,
 void set_current_tokenizer(ChatTokenizer *tokenizer);
 
 char *expand_attachments(const char *content);
+char *base64_encode(const unsigned char *data, size_t input_length);
+char *get_file_extension(const char *filename);
+const char *get_image_mime_type(const char *extension);
+bool is_image_file(const char *filename);
 
 void append_to_response(LLMResponse *resp, const char *data, size_t len);
 void append_to_reasoning(LLMResponse *resp, const char *data, size_t len);

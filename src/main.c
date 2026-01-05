@@ -185,6 +185,162 @@ static bool save_attachment_to_list(const char *text, size_t text_len,
   return attachment_list_add(list, filename, text_len);
 }
 
+static char *expand_tilde_path(const char *path) {
+  if (!path || path[0] != '~')
+    return strdup(path);
+
+  const char *home = getenv("HOME");
+  if (!home)
+    return strdup(path);
+
+  size_t home_len = strlen(home);
+  size_t path_len = strlen(path + 1);
+  char *expanded = malloc(home_len + path_len + 1);
+  if (!expanded)
+    return NULL;
+
+  strcpy(expanded, home);
+  strcat(expanded, path + 1);
+  return expanded;
+}
+
+static bool attach_file_to_list(const char *filepath, AttachmentList *list,
+                                char *error_msg, size_t error_msg_size) {
+  if (!filepath || !list) {
+    if (error_msg)
+      snprintf(error_msg, error_msg_size, "Invalid parameters");
+    return false;
+  }
+
+  if (list->count >= MAX_ATTACHMENTS) {
+    if (error_msg)
+      snprintf(error_msg, error_msg_size, "Maximum %d attachments reached",
+               MAX_ATTACHMENTS);
+    return false;
+  }
+
+  if (!ensure_attachments_dir()) {
+    if (error_msg)
+      snprintf(error_msg, error_msg_size,
+               "Failed to create attachments directory");
+    return false;
+  }
+
+  char *expanded_path = expand_tilde_path(filepath);
+  if (!expanded_path) {
+    if (error_msg)
+      snprintf(error_msg, error_msg_size, "Failed to expand path");
+    return false;
+  }
+
+  FILE *src = fopen(expanded_path, "rb");
+  if (!src) {
+    if (error_msg)
+      snprintf(error_msg, error_msg_size, "File not found: %s", expanded_path);
+    free(expanded_path);
+    return false;
+  }
+
+  fseek(src, 0, SEEK_END);
+  long file_size = ftell(src);
+  fseek(src, 0, SEEK_SET);
+
+  if (file_size <= 0) {
+    if (error_msg)
+      snprintf(error_msg, error_msg_size, "File is empty");
+    fclose(src);
+    free(expanded_path);
+    return false;
+  }
+
+  if (file_size > 10 * 1024 * 1024) {
+    if (error_msg)
+      snprintf(error_msg, error_msg_size, "File too large (max 10MB)");
+    fclose(src);
+    free(expanded_path);
+    return false;
+  }
+
+  const char *basename = strrchr(expanded_path, '/');
+  basename = basename ? basename + 1 : expanded_path;
+
+  const char *home = getenv("HOME");
+  if (!home) {
+    if (error_msg)
+      snprintf(error_msg, error_msg_size, "HOME not set");
+    fclose(src);
+    free(expanded_path);
+    return false;
+  }
+
+  time_t now = time(NULL);
+  static int counter = 0;
+  char filename[256];
+  const char *ext = strrchr(basename, '.');
+  if (ext) {
+    char base[128];
+    size_t base_len = ext - basename;
+    if (base_len > 127)
+      base_len = 127;
+    strncpy(base, basename, base_len);
+    base[base_len] = '\0';
+    snprintf(filename, sizeof(filename), "%s_%ld_%d%s", base, (long)now,
+             counter++, ext);
+  } else {
+    snprintf(filename, sizeof(filename), "%s_%ld_%d", basename, (long)now,
+             counter++);
+  }
+
+  char dest_path[768];
+  snprintf(dest_path, sizeof(dest_path), "%s/.config/sillytui/attachments/%s",
+           home, filename);
+
+  FILE *dest = fopen(dest_path, "wb");
+  if (!dest) {
+    if (error_msg)
+      snprintf(error_msg, error_msg_size, "Failed to create destination file");
+    fclose(src);
+    free(expanded_path);
+    return false;
+  }
+
+  char buffer[4096];
+  size_t total_written = 0;
+  size_t bytes_read;
+  while ((bytes_read = fread(buffer, 1, sizeof(buffer), src)) > 0) {
+    size_t bytes_written = fwrite(buffer, 1, bytes_read, dest);
+    total_written += bytes_written;
+    if (bytes_written != bytes_read) {
+      if (error_msg)
+        snprintf(error_msg, error_msg_size, "Write error");
+      fclose(src);
+      fclose(dest);
+      unlink(dest_path);
+      free(expanded_path);
+      return false;
+    }
+  }
+
+  fclose(src);
+  fclose(dest);
+  free(expanded_path);
+
+  if (total_written != (size_t)file_size) {
+    if (error_msg)
+      snprintf(error_msg, error_msg_size, "Incomplete copy");
+    unlink(dest_path);
+    return false;
+  }
+
+  bool result = attachment_list_add(list, filename, file_size);
+  if (!result && error_msg) {
+    snprintf(error_msg, error_msg_size, "Failed to add to attachment list");
+    unlink(dest_path);
+  }
+
+  return result;
+}
+
 static void delete_attachment_file(const char *filename) {
   if (!filename)
     return;
@@ -477,6 +633,7 @@ static const SlashCommand SLASH_COMMANDS[] = {
     {"char info", "Show character info"},
     {"char greetings", "Select alternate greeting"},
     {"char unload", "Unload current character"},
+    {"attach", "Attach a file/image (e.g., /attach ~/image.png)"},
     {"persona set", "Edit your persona"},
     {"persona info", "Show your persona"},
     {"sys", "Insert a system message"},
@@ -574,7 +731,8 @@ static bool handle_slash_command(const char *input, Modal *modal,
                                  char *current_chat_id, char *current_char_path,
                                  CharacterCard *character, Persona *persona,
                                  bool *char_loaded, AuthorNote *author_note,
-                                 Lorebook *lorebook, ChatTokenizer *tokenizer) {
+                                 Lorebook *lorebook, ChatTokenizer *tokenizer,
+                                 AttachmentList *attachments) {
   log_message(LOG_INFO, __FILE__, __LINE__, "Slash command: %s", input);
   if (strcmp(input, "/model set") == 0) {
     modal_open_model_set(modal);
@@ -836,6 +994,7 @@ static bool handle_slash_command(const char *input, Modal *modal,
                        "/lore info         - Lorebook info\n"
                        "/lore list         - List entries\n"
                        "/lore toggle <id>  - Toggle entry\n"
+                       "/attach <path>     - Attach file/image\n"
                        "/tokenizer <name>  - Set tokenizer\n"
                        "/tokenize          - Token counter\n"
                        "/clear             - Clear chat history\n"
@@ -867,6 +1026,40 @@ static bool handle_slash_command(const char *input, Modal *modal,
         (*char_loaded && character->name[0]) ? character->name : NULL;
     chat_auto_save(history, current_chat_id, CHAT_ID_MAX, current_char_path,
                    char_name);
+    return true;
+  }
+  if (strncmp(input, "/attach ", 8) == 0) {
+    const char *filepath = input + 8;
+    while (*filepath == ' ')
+      filepath++;
+
+    if (!*filepath) {
+      modal_open_message(
+          modal, "Usage: /attach <filepath>\nExample: /attach ~/image.png",
+          true);
+      return true;
+    }
+
+    if (!attachments) {
+      modal_open_message(modal, "Attachments not available", true);
+      return true;
+    }
+
+    char error_msg[512];
+    if (attach_file_to_list(filepath, attachments, error_msg,
+                            sizeof(error_msg))) {
+      log_message(LOG_INFO, __FILE__, __LINE__, "File attached: %s", filepath);
+      char success_msg[512];
+      snprintf(success_msg, sizeof(success_msg), "Attached: %s", filepath);
+      modal_open_message(modal, success_msg, false);
+    } else {
+      log_message(LOG_WARNING, __FILE__, __LINE__,
+                  "Failed to attach file: %s - %s", filepath, error_msg);
+      char fail_msg[768];
+      snprintf(fail_msg, sizeof(fail_msg), "Failed to attach file:\n%s",
+               error_msg);
+      modal_open_message(modal, fail_msg, true);
+    }
     return true;
   }
   if (strncmp(input, "/sys ", 5) == 0) {
@@ -2601,7 +2794,7 @@ int main(void) {
         if (handle_slash_command(input_buffer, &modal, &models, &history,
                                  current_chat_id, current_char_path, &character,
                                  &persona, &character_loaded, &author_note,
-                                 &lorebook, &tokenizer)) {
+                                 &lorebook, &tokenizer, &attachments)) {
           input_buffer[0] = '\0';
           input_len = 0;
           cursor_pos = 0;

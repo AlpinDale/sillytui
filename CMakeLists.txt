@@ -105,6 +105,7 @@ set(TEST_SOURCES
     tests/test_simd.c
     tests/test_tokenizer.c
     tests/test_modal.c
+    tests/test_attachments.c
     src/core/config.c
     src/core/macros.c
     src/core/time.c
@@ -113,6 +114,11 @@ set(TEST_SOURCES
     src/chat/history.c
     src/chat/author_note.c
     src/llm/sampler.c
+    src/llm/common.c
+    src/llm/llm.c
+    src/llm/backends/openai.c
+    src/llm/backends/anthropic.c
+    src/llm/backends/kobold.c
     src/tokenizer/tiktoken.c
     src/tokenizer/simd.c
     src/tokenizer/unicode_tables.c
@@ -129,6 +135,7 @@ set(TEST_SOURCES
     src/chat/chat.c
     src/character/character.c
     src/character/persona.c
+    src/lore/lorebook.c
 )
 
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "arm64|aarch64")

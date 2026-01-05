@@ -1,9 +1,12 @@
 #include "common.h"
 #include "core/macros.h"
 #include "tokenizer/selector.h"
+#include <stdbool.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 
 void sb_init(StringBuilder *sb) {
   sb->data = NULL;
@@ -470,6 +473,66 @@ static char *load_attachment_content(const char *ref) {
   content[read_len] = '\0';
 
   return content;
+}
+
+char *base64_encode(const unsigned char *data, size_t input_length) {
+  static const char encoding_table[] =
+      "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+  size_t output_length = 4 * ((input_length + 2) / 3);
+  char *encoded_data = malloc(output_length + 1);
+  if (!encoded_data)
+    return NULL;
+
+  for (size_t i = 0, j = 0; i < input_length;) {
+    uint32_t octet_a = i < input_length ? (unsigned char)data[i++] : 0;
+    uint32_t octet_b = i < input_length ? (unsigned char)data[i++] : 0;
+    uint32_t octet_c = i < input_length ? (unsigned char)data[i++] : 0;
+    uint32_t triple = (octet_a << 0x10) + (octet_b << 0x08) + octet_c;
+
+    encoded_data[j++] = encoding_table[(triple >> 3 * 6) & 0x3F];
+    encoded_data[j++] = encoding_table[(triple >> 2 * 6) & 0x3F];
+    encoded_data[j++] = encoding_table[(triple >> 1 * 6) & 0x3F];
+    encoded_data[j++] = encoding_table[(triple >> 0 * 6) & 0x3F];
+  }
+
+  int mod_table[] = {0, 2, 1};
+  for (int i = 0; i < mod_table[input_length % 3]; i++)
+    encoded_data[output_length - 1 - i] = '=';
+
+  encoded_data[output_length] = '\0';
+  return encoded_data;
+}
+
+char *get_file_extension(const char *filename) {
+  if (!filename)
+    return NULL;
+  const char *dot = strrchr(filename, '.');
+  if (!dot || dot == filename)
+    return NULL;
+  return strdup(dot + 1);
+}
+
+const char *get_image_mime_type(const char *extension) {
+  if (!extension)
+    return NULL;
+  if (strcasecmp(extension, "jpg") == 0 || strcasecmp(extension, "jpeg") == 0)
+    return "image/jpeg";
+  if (strcasecmp(extension, "png") == 0)
+    return "image/png";
+  if (strcasecmp(extension, "gif") == 0)
+    return "image/gif";
+  if (strcasecmp(extension, "webp") == 0)
+    return "image/webp";
+  return NULL;
+}
+
+bool is_image_file(const char *filename) {
+  char *ext = get_file_extension(filename);
+  if (!ext)
+    return false;
+  const char *mime = get_image_mime_type(ext);
+  free(ext);
+  return mime != NULL;
 }
 
 char *expand_attachments(const char *content) {

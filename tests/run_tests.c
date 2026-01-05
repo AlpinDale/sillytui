@@ -13,6 +13,7 @@ extern void run_sampler_tests(void);
 extern void run_simd_tests(void);
 extern void run_tokenizer_tests(void);
 extern void run_modal_tests(void);
+extern void run_attachment_tests(void);
 
 int main(int argc, char **argv) {
   (void)argc;
@@ -34,6 +35,7 @@ int main(int argc, char **argv) {
   run_simd_tests();
   run_tokenizer_tests();
   run_modal_tests();
+  run_attachment_tests();
 
   print_test_summary();
 

@@ -5,10 +5,182 @@
 #include "core/macros.h"
 #include "llm/common.h"
 #include <curl/curl.h>
+#include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+static char *load_image_attachment_base64(const char *filename,
+                                          const char **out_mime_type) {
+  const char *home = getenv("HOME");
+  if (!home)
+    return NULL;
+
+  char filepath[768];
+  snprintf(filepath, sizeof(filepath), "%s/.config/sillytui/attachments/%s",
+           home, filename);
+
+  FILE *f = fopen(filepath, "rb");
+  if (!f)
+    return NULL;
+
+  fseek(f, 0, SEEK_END);
+  long len = ftell(f);
+  fseek(f, 0, SEEK_SET);
+
+  if (len <= 0 || len > 10 * 1024 * 1024) {
+    fclose(f);
+    return NULL;
+  }
+
+  unsigned char *data = malloc(len);
+  if (!data) {
+    fclose(f);
+    return NULL;
+  }
+
+  size_t read_len = fread(data, 1, len, f);
+  fclose(f);
+
+  if (read_len != (size_t)len) {
+    free(data);
+    return NULL;
+  }
+
+  char *ext = get_file_extension(filename);
+  if (ext && out_mime_type) {
+    *out_mime_type = get_image_mime_type(ext);
+    free(ext);
+  }
+
+  char *base64 = base64_encode(data, read_len);
+  free(data);
+  return base64;
+}
+
+static char *build_message_content(const char *text, const char *char_name,
+                                   const char *user_name, bool *has_images) {
+  if (!text)
+    return NULL;
+
+  *has_images = false;
+  bool found_image = false;
+  const char *scan = text;
+  while ((scan = strstr(scan, "[Attachment: ")) != NULL) {
+    const char *end = strchr(scan, ']');
+    if (!end)
+      break;
+
+    size_t filename_len = end - (scan + 13);
+    if (filename_len > 0 && filename_len < 256) {
+      char filename[256];
+      strncpy(filename, scan + 13, filename_len);
+      filename[filename_len] = '\0';
+
+      if (is_image_file(filename)) {
+        found_image = true;
+        break;
+      }
+    }
+    scan = end + 1;
+  }
+
+  if (!found_image) {
+    char *substituted = macro_substitute(text, char_name, user_name);
+    char *escaped = escape_json_string(substituted ? substituted : text);
+    free(substituted);
+    return escaped;
+  }
+
+  *has_images = true;
+  StringBuilder sb;
+  sb_init(&sb);
+  sb_append(&sb, "[");
+
+  const char *remaining = text;
+  bool first_block = true;
+
+  while (*remaining) {
+    const char *attachment_start = strstr(remaining, "[Attachment: ");
+    if (!attachment_start) {
+      if (*remaining) {
+        char *substituted = macro_substitute(remaining, char_name, user_name);
+        char *escaped =
+            escape_json_string(substituted ? substituted : remaining);
+        free(substituted);
+        if (escaped) {
+          if (!first_block)
+            sb_append(&sb, ",");
+          sb_append(&sb, "{\"type\":\"text\",\"text\":\"");
+          sb_append(&sb, escaped);
+          sb_append(&sb, "\"}");
+          free(escaped);
+          first_block = false;
+        }
+      }
+      break;
+    }
+
+    if (attachment_start > remaining) {
+      size_t text_len = attachment_start - remaining;
+      char *text_part = malloc(text_len + 1);
+      if (text_part) {
+        strncpy(text_part, remaining, text_len);
+        text_part[text_len] = '\0';
+        char *substituted = macro_substitute(text_part, char_name, user_name);
+        char *escaped =
+            escape_json_string(substituted ? substituted : text_part);
+        free(substituted);
+        free(text_part);
+        if (escaped) {
+          if (!first_block)
+            sb_append(&sb, ",");
+          sb_append(&sb, "{\"type\":\"text\",\"text\":\"");
+          sb_append(&sb, escaped);
+          sb_append(&sb, "\"}");
+          free(escaped);
+          first_block = false;
+        }
+      }
+    }
+
+    const char *attachment_end = strchr(attachment_start, ']');
+    if (!attachment_end) {
+      remaining = attachment_start + 13;
+      continue;
+    }
+
+    size_t filename_len = attachment_end - (attachment_start + 13);
+    if (filename_len > 0 && filename_len < 256) {
+      char filename[256];
+      strncpy(filename, attachment_start + 13, filename_len);
+      filename[filename_len] = '\0';
+
+      if (is_image_file(filename)) {
+        const char *mime_type = NULL;
+        char *base64 = load_image_attachment_base64(filename, &mime_type);
+        if (base64 && mime_type) {
+          if (!first_block)
+            sb_append(&sb, ",");
+          sb_append(&sb,
+                    "{\"type\":\"image_url\",\"image_url\":{\"url\":\"data:");
+          sb_append(&sb, mime_type);
+          sb_append(&sb, ";base64,");
+          sb_append(&sb, base64);
+          sb_append(&sb, "\"}}");
+          free(base64);
+          first_block = false;
+        }
+      }
+    }
+
+    remaining = attachment_end + 1;
+  }
+
+  sb_append(&sb, "]");
+  return sb_finish(&sb);
+}
 
 static int openai_tokenize(const ModelConfig *config, const char *text) {
   (void)config;
@@ -243,22 +415,18 @@ static char *openai_build_request(const ModelConfig *config,
         content++;
     }
 
-    char *expanded = expand_attachments(content);
-    char *substituted =
-        macro_substitute(expanded ? expanded : content, char_name, user_name);
-    if (expanded)
-      free(expanded);
-    char *escaped = escape_json_string(substituted ? substituted : content);
-    free(substituted);
-    if (!escaped)
+    bool has_images = false;
+    char *content_json =
+        build_message_content(content, char_name, user_name, &has_images);
+    if (!content_json)
       continue;
 
-    size_t needed = strlen(escaped) + 64;
+    size_t needed = strlen(content_json) + 128;
     if (pos + needed >= cap) {
       cap = (pos + needed) * 2;
       char *tmp = realloc(body, cap);
       if (!tmp) {
-        free(escaped);
+        free(content_json);
         free(body);
         return NULL;
       }
@@ -270,33 +438,43 @@ static char *openai_build_request(const ModelConfig *config,
     }
     first = false;
 
-    pos += snprintf(body + pos, cap - pos,
-                    "{\"role\":\"%s\",\"content\":\"%s\"}", role, escaped);
-    free(escaped);
+    if (has_images) {
+      pos += snprintf(body + pos, cap - pos, "{\"role\":\"%s\",\"content\":%s}",
+                      role, content_json);
+    } else {
+      pos +=
+          snprintf(body + pos, cap - pos,
+                   "{\"role\":\"%s\",\"content\":\"%s\"}", role, content_json);
+    }
+    free(content_json);
   }
 
   if (context && context->character &&
       context->character->post_history_instructions &&
       context->character->post_history_instructions[0]) {
-    char *substituted = macro_substitute(
-        context->character->post_history_instructions, char_name, user_name);
-    if (substituted) {
-      char *escaped = escape_json_string(substituted);
-      if (escaped) {
-        size_t needed = strlen(escaped) + 64;
-        if (pos + needed >= cap) {
-          cap = (pos + needed) * 2;
-          char *tmp = realloc(body, cap);
-          if (tmp)
-            body = tmp;
-        }
-        if (!first)
-          body[pos++] = ',';
-        pos += snprintf(body + pos, cap - pos,
-                        "{\"role\":\"system\",\"content\":\"%s\"}", escaped);
-        free(escaped);
+    bool has_images = false;
+    char *content_json =
+        build_message_content(context->character->post_history_instructions,
+                              char_name, user_name, &has_images);
+    if (content_json) {
+      size_t needed = strlen(content_json) + 128;
+      if (pos + needed >= cap) {
+        cap = (pos + needed) * 2;
+        char *tmp = realloc(body, cap);
+        if (tmp)
+          body = tmp;
       }
-      free(substituted);
+      if (!first)
+        body[pos++] = ',';
+      if (has_images) {
+        pos += snprintf(body + pos, cap - pos,
+                        "{\"role\":\"system\",\"content\":%s}", content_json);
+      } else {
+        pos +=
+            snprintf(body + pos, cap - pos,
+                     "{\"role\":\"system\",\"content\":\"%s\"}", content_json);
+      }
+      free(content_json);
     }
   }
 
