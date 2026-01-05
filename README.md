@@ -14,11 +14,78 @@ Still in development.
 
 ### Installation & Usage
 
+<details>
+<summary>Platform-specific installation instructions</summary>
+
+#### macOS
 ```bash
-sudo apt update && sudo apt install -y cmake libncursesw5-dev libcurl4-openssl-dev
+brew install cmake ncurses curl
 git clone https://github.com/AlpinDale/sillytui.git && cd sillytui
 make run
 ```
+
+#### Windows
+TODO
+
+#### Ubuntu/Debian (and their variants)
+```bash
+sudo apt update && sudo apt install -y build-essential cmake libncursesw5-dev libcurl4-openssl-dev
+git clone https://github.com/AlpinDale/sillytui.git && cd sillytui
+make run
+```
+
+#### Arch Linux
+```bash
+sudo pacman -S base-devel cmake ncurses curl git
+git clone https://github.com/AlpinDale/sillytui.git && cd sillytui
+make run
+```
+
+#### Fedora
+```bash
+sudo dnf install cmake ncurses-devel libcurl-devel git
+git clone https://github.com/AlpinDale/sillytui.git && cd sillytui
+make run
+```
+
+#### OpenSUSE
+```bash
+sudo zypper install cmake ncurses-devel libcurl-devel git
+git clone https://github.com/AlpinDale/sillytui.git && cd sillytui
+make run
+```
+
+#### Gentoo
+```bash
+sudo emerge -av dev-vcs/git sys-devel/cmake sys-libs/ncurses sys-libs/libcurl
+git clone https://github.com/AlpinDale/sillytui.git && cd sillytui
+make run
+```
+
+#### Alpine Linux
+```bash
+apk add cmake ncurses-dev curl-dev git
+git clone https://github.com/AlpinDale/sillytui.git && cd sillytui
+make run
+```
+
+#### FreeBSD
+Untested, but:
+
+```bash
+pkg install cmake ncurses curl git
+git clone https://github.com/AlpinDale/sillytui.git && cd sillytui
+make run
+```
+
+#### Android (Termux)
+```bash
+pkg install build-essential cmake ncurses libcurl git
+git clone https://github.com/AlpinDale/sillytui.git && cd sillytui
+make run
+```
+
+</details>
 
 See `/help` for available commands.
 
@@ -65,3 +132,5 @@ Decoded tokens:
 
 - [Kat](https://github.com/Theldus/kat) for C syntax highlighting
 - [ulight](https://github.com/eisenwave/ulight) for general purpose syntax highlighting
+- [ncurses](https://invisible-island.net/ncurses/ncurses.html) for terminal UI
+- [curl](https://curl.se/) for HTTP requests
