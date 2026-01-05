@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   build-and-release:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
         with:
@@ -19,7 +19,9 @@ jobs:
       - name: Install Linux dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake libncursesw5-dev libcurl4-openssl-dev
+          sudo apt-get install -y cmake libncursesw5-dev libcurl4-openssl-dev gcc-13 g++-13
+          sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-13 100
+          sudo update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-13 100
 
       - name: Build Linux
         run: |
@@ -38,7 +40,7 @@ jobs:
 
   build-macos:
     needs: build-and-release
-    runs-on: macos-14
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
 
