@@ -1,5 +1,11 @@
 #if defined(__aarch64__) || defined(_M_ARM64)
 
+#ifdef __APPLE__
+#define SYMBOL(name) _##name
+#else
+#define SYMBOL(name) name
+#endif
+
 .text
 .align 4
 
@@ -11,8 +17,8 @@
 // x1 = length
 // Returns: 64-bit hash in x0
 // =============================================================================
-.globl _simd_hash_bytes_arm64
-_simd_hash_bytes_arm64:
+.globl SYMBOL(simd_hash_bytes_arm64)
+SYMBOL(simd_hash_bytes_arm64):
     mov     w2, #0xFFFFFFFF         // Initial CRC value
     cbz     x1, .Lhash_done         // If len == 0, return initial value
     
@@ -54,8 +60,8 @@ _simd_hash_bytes_arm64:
 // x1 = length
 // Returns: index of first non-ASCII byte, or len if all ASCII
 // =============================================================================
-.globl _simd_find_non_ascii_arm64
-_simd_find_non_ascii_arm64:
+.globl SYMBOL(simd_find_non_ascii_arm64)
+SYMBOL(simd_find_non_ascii_arm64):
     mov     x2, x0                  // Save original pointer
     mov     x3, x1                  // Save original length
     
@@ -100,8 +106,8 @@ _simd_find_non_ascii_arm64:
 // x1 = length
 // Returns: 1 if all ASCII, 0 otherwise
 // =============================================================================
-.globl _simd_is_all_ascii_arm64
-_simd_is_all_ascii_arm64:
+.globl SYMBOL(simd_is_all_ascii_arm64)
+SYMBOL(simd_is_all_ascii_arm64):
     movi    v2.16b, #0              // Accumulator for high bits
     
 .Lall_ascii_loop16:
@@ -145,8 +151,8 @@ _simd_is_all_ascii_arm64:
 // x1 = length
 // Returns: number of UTF-8 characters
 // =============================================================================
-.globl _simd_count_utf8_chars_arm64
-_simd_count_utf8_chars_arm64:
+.globl SYMBOL(simd_count_utf8_chars_arm64)
+SYMBOL(simd_count_utf8_chars_arm64):
     mov     x2, #0                  // Character count
     
 .Lcount_loop16:
@@ -197,8 +203,8 @@ _simd_count_utf8_chars_arm64:
 // x2 = out_min pointer (to store the minimum value)
 // Returns: index of minimum value
 // =============================================================================
-.globl _simd_argmin_u32_arm64
-_simd_argmin_u32_arm64:
+.globl SYMBOL(simd_argmin_u32_arm64)
+SYMBOL(simd_argmin_u32_arm64):
     cbz     x1, .Largmin_empty
     
     mov     x3, #0                  // min_idx
@@ -285,8 +291,8 @@ _simd_argmin_u32_arm64:
 // x1 = length
 // Returns: number of consecutive ASCII letters
 // =============================================================================
-.globl _simd_match_ascii_letters_arm64
-_simd_match_ascii_letters_arm64:
+.globl SYMBOL(simd_match_ascii_letters_arm64)
+SYMBOL(simd_match_ascii_letters_arm64):
     cbz     x1, .Lletters_done_zero
     
     mov     x2, #0                  // matched count
