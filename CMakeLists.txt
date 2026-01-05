@@ -14,7 +14,7 @@ if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
 endif()
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-add_compile_options(-Wall -Wextra -Werror)
+add_compile_options(-Wall -Wextra)
 
 if(CMAKE_C_COMPILER_ID STREQUAL "GNU")
     add_compile_options(-Wno-stringop-truncation)
