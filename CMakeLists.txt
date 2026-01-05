@@ -240,6 +240,9 @@ set(ALL_TEST_SOURCES
     src/ui/modal.c
     src/ui/ui.c
     src/ui/markdown.c
+    src/ui/syntax/syntax_ncurses.c
+    src/ui/syntax/c/highlight.c
+    src/ui/syntax/c/hashtable.c
 )
 
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "arm64|aarch64")
@@ -248,9 +251,12 @@ elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
     list(APPEND ALL_TEST_SOURCES src/tokenizer/simd_x86_64.S)
 endif()
 
-add_executable(run_all_tests ${ALL_TEST_SOURCES})
+add_executable(run_all_tests ${ALL_TEST_SOURCES} ${ULIGHT_SOURCES})
+
+set_source_files_properties(${ULIGHT_SOURCES} PROPERTIES COMPILE_FLAGS "-Wno-trigraphs")
+
 target_compile_definitions(run_all_tests PRIVATE _XOPEN_SOURCE_EXTENDED NCURSES_WIDECHAR=1)
-target_include_directories(run_all_tests PRIVATE ${CURSES_INCLUDE_DIR} src tests tests/boundary tests/stress tests/generated tests/property)
+target_include_directories(run_all_tests PRIVATE ${CURSES_INCLUDE_DIR} src tests tests/boundary tests/stress tests/generated tests/property src/ui/syntax/ulight/include)
 target_link_libraries(run_all_tests PRIVATE ${CURSES_LIBRARIES} ${CURL_LIBRARIES} m)
 
 add_test(NAME all_tests COMMAND run_all_tests)
