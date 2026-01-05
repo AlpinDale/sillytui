@@ -16,6 +16,10 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 add_compile_options(-Wall -Wextra -Werror)
 
+if(CMAKE_C_COMPILER_ID STREQUAL "GNU")
+    add_compile_options(-Wno-stringop-truncation)
+endif()
+
 # POSIX feature test macros for nftw and other functions (Linux only)
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     add_compile_definitions(_XOPEN_SOURCE=500 _GNU_SOURCE)
