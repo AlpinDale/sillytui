@@ -1,12 +1,15 @@
 #include "common.h"
 #include "core/macros.h"
+#include "core/platform.h"
 #include "tokenizer/selector.h"
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifndef _WIN32
 #include <strings.h>
+#endif
 
 void sb_init(StringBuilder *sb) {
   sb->data = NULL;
@@ -437,7 +440,7 @@ static char *load_attachment_content(const char *ref) {
   if (filename_len == 0 || filename_len >= 256)
     return NULL;
 
-  const char *home = getenv("HOME");
+  const char *home = get_home_dir();
   if (!home)
     return NULL;
 

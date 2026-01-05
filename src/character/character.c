@@ -1,18 +1,19 @@
 #include "character/character.h"
+#include "core/platform.h"
 #include <ctype.h>
-#include <pwd.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/stat.h>
-#include <unistd.h>
+#ifndef _WIN32
+#include <pwd.h>
+#endif
 
 static char *expand_tilde(const char *path) {
   if (!path || path[0] != '~')
     return strdup(path);
 
-  const char *home = getenv("HOME");
+  const char *home = get_home_dir();
   if (!home) {
     struct passwd *pw = getpwuid(getuid());
     if (pw)
@@ -537,7 +538,7 @@ const char *character_get_greeting(const CharacterCard *card, size_t index) {
 }
 
 static bool ensure_characters_dir(void) {
-  const char *home = getenv("HOME");
+  const char *home = get_home_dir();
   if (!home)
     return false;
 
@@ -600,7 +601,7 @@ char *character_copy_to_config(const char *src_path) {
     return NULL;
   }
 
-  const char *home = getenv("HOME");
+  const char *home = get_home_dir();
   char *dest_path = malloc(512);
   if (!dest_path) {
     free(data);

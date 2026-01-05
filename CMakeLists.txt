@@ -14,12 +14,29 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     add_compile_definitions(_XOPEN_SOURCE=500 _GNU_SOURCE)
 endif()
 
-# Enable AVX2 for x86_64
-if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
+# Enable AVX2 for x86_64 (not on Windows, different ABI)
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64" AND NOT WIN32)
     add_compile_options(-march=x86-64-v3)
 endif()
 
-find_package(Curses REQUIRED)
+# Curses library setup
+if(WIN32)
+    # Use PDCursesMod for Windows
+    set(PDC_BUILD_SHARED OFF CACHE BOOL "Build static PDCurses" FORCE)
+    set(PDC_UTF8 ON CACHE BOOL "Force UTF-8 mode" FORCE)
+    set(PDC_SDL2_BUILD OFF CACHE BOOL "Don't build SDL2 backend" FORCE)
+    set(PDC_SDL2_DEPS_BUILD OFF CACHE BOOL "Don't build SDL2 deps" FORCE)
+    set(PDC_GL_BUILD OFF CACHE BOOL "Don't build GL backend" FORCE)
+    
+    add_subdirectory(third-party/PDCursesMod EXCLUDE_FROM_ALL)
+    
+    # PDCursesMod creates vt_pdcursesstatic target
+    set(CURSES_LIBRARIES vt_pdcursesstatic)
+    set(CURSES_INCLUDE_DIR ${CMAKE_SOURCE_DIR}/third-party/PDCursesMod)
+else()
+    find_package(Curses REQUIRED)
+endif()
+
 find_package(CURL REQUIRED)
 
 set(ULIGHT_SOURCES
@@ -80,19 +97,26 @@ set(SOURCES
     src/tokenizer/unicode_tables.c
 )
 
-if(CMAKE_SYSTEM_PROCESSOR MATCHES "arm64|aarch64")
-    enable_language(ASM)
-    list(APPEND SOURCES src/tokenizer/simd_arm64.S)
-elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
-    enable_language(ASM)
-    list(APPEND SOURCES src/tokenizer/simd_x86_64.S)
+# SIMD assembly (not on Windows - different ABI, use C fallbacks)
+if(NOT WIN32)
+    if(CMAKE_SYSTEM_PROCESSOR MATCHES "arm64|aarch64")
+        enable_language(ASM)
+        list(APPEND SOURCES src/tokenizer/simd_arm64.S)
+    elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
+        enable_language(ASM)
+        list(APPEND SOURCES src/tokenizer/simd_x86_64.S)
+    endif()
 endif()
 
 add_executable(sillytui ${SOURCES} ${ULIGHT_SOURCES})
 
 set_source_files_properties(${ULIGHT_SOURCES} PROPERTIES COMPILE_FLAGS "-Wno-trigraphs")
 
-target_compile_definitions(sillytui PRIVATE _XOPEN_SOURCE_EXTENDED NCURSES_WIDECHAR=1)
+if(WIN32)
+    target_compile_definitions(sillytui PRIVATE PDC_FORCE_UTF8)
+else()
+    target_compile_definitions(sillytui PRIVATE _XOPEN_SOURCE_EXTENDED NCURSES_WIDECHAR=1)
+endif()
 target_include_directories(sillytui PRIVATE ${CURSES_INCLUDE_DIR} ${CURL_INCLUDE_DIRS} src src/ui/syntax/ulight/include)
 target_link_libraries(sillytui PRIVATE ${CURSES_LIBRARIES} ${CURL_LIBRARIES})
 
@@ -138,14 +162,20 @@ set(TEST_SOURCES
     src/lore/lorebook.c
 )
 
-if(CMAKE_SYSTEM_PROCESSOR MATCHES "arm64|aarch64")
-    list(APPEND TEST_SOURCES src/tokenizer/simd_arm64.S)
-elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
-    list(APPEND TEST_SOURCES src/tokenizer/simd_x86_64.S)
+if(NOT WIN32)
+    if(CMAKE_SYSTEM_PROCESSOR MATCHES "arm64|aarch64")
+        list(APPEND TEST_SOURCES src/tokenizer/simd_arm64.S)
+    elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
+        list(APPEND TEST_SOURCES src/tokenizer/simd_x86_64.S)
+    endif()
 endif()
 
 add_executable(run_tests ${TEST_SOURCES} ${ULIGHT_SOURCES})
-target_compile_definitions(run_tests PRIVATE _XOPEN_SOURCE_EXTENDED NCURSES_WIDECHAR=1)
+if(WIN32)
+    target_compile_definitions(run_tests PRIVATE PDC_FORCE_UTF8)
+else()
+    target_compile_definitions(run_tests PRIVATE _XOPEN_SOURCE_EXTENDED NCURSES_WIDECHAR=1)
+endif()
 target_include_directories(run_tests PRIVATE ${CURSES_INCLUDE_DIR} src tests src/ui/syntax/ulight/include)
 target_link_libraries(run_tests PRIVATE ${CURSES_LIBRARIES} ${CURL_LIBRARIES} m)
 
@@ -184,14 +214,20 @@ set(INTEGRATION_TEST_SOURCES
     src/ui/syntax/c/hashtable.c
 )
 
-if(CMAKE_SYSTEM_PROCESSOR MATCHES "arm64|aarch64")
-    list(APPEND INTEGRATION_TEST_SOURCES src/tokenizer/simd_arm64.S)
-elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
-    list(APPEND INTEGRATION_TEST_SOURCES src/tokenizer/simd_x86_64.S)
+if(NOT WIN32)
+    if(CMAKE_SYSTEM_PROCESSOR MATCHES "arm64|aarch64")
+        list(APPEND INTEGRATION_TEST_SOURCES src/tokenizer/simd_arm64.S)
+    elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
+        list(APPEND INTEGRATION_TEST_SOURCES src/tokenizer/simd_x86_64.S)
+    endif()
 endif()
 
 add_executable(run_integration_tests ${INTEGRATION_TEST_SOURCES} ${ULIGHT_SOURCES})
-target_compile_definitions(run_integration_tests PRIVATE _XOPEN_SOURCE_EXTENDED NCURSES_WIDECHAR=1)
+if(WIN32)
+    target_compile_definitions(run_integration_tests PRIVATE PDC_FORCE_UTF8)
+else()
+    target_compile_definitions(run_integration_tests PRIVATE _XOPEN_SOURCE_EXTENDED NCURSES_WIDECHAR=1)
+endif()
 target_include_directories(run_integration_tests PRIVATE ${CURSES_INCLUDE_DIR} src tests tests/integration src/ui/syntax/ulight/include)
 target_link_libraries(run_integration_tests PRIVATE ${CURSES_LIBRARIES} ${CURL_LIBRARIES} m)
 
@@ -252,17 +288,23 @@ set(ALL_TEST_SOURCES
     src/ui/syntax/c/hashtable.c
 )
 
-if(CMAKE_SYSTEM_PROCESSOR MATCHES "arm64|aarch64")
-    list(APPEND ALL_TEST_SOURCES src/tokenizer/simd_arm64.S)
-elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
-    list(APPEND ALL_TEST_SOURCES src/tokenizer/simd_x86_64.S)
+if(NOT WIN32)
+    if(CMAKE_SYSTEM_PROCESSOR MATCHES "arm64|aarch64")
+        list(APPEND ALL_TEST_SOURCES src/tokenizer/simd_arm64.S)
+    elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
+        list(APPEND ALL_TEST_SOURCES src/tokenizer/simd_x86_64.S)
+    endif()
 endif()
 
 add_executable(run_all_tests ${ALL_TEST_SOURCES} ${ULIGHT_SOURCES})
 
 set_source_files_properties(${ULIGHT_SOURCES} PROPERTIES COMPILE_FLAGS "-Wno-trigraphs")
 
-target_compile_definitions(run_all_tests PRIVATE _XOPEN_SOURCE_EXTENDED NCURSES_WIDECHAR=1)
+if(WIN32)
+    target_compile_definitions(run_all_tests PRIVATE PDC_FORCE_UTF8)
+else()
+    target_compile_definitions(run_all_tests PRIVATE _XOPEN_SOURCE_EXTENDED NCURSES_WIDECHAR=1)
+endif()
 target_include_directories(run_all_tests PRIVATE ${CURSES_INCLUDE_DIR} src tests tests/boundary tests/stress tests/generated tests/property src/ui/syntax/ulight/include)
 target_link_libraries(run_all_tests PRIVATE ${CURSES_LIBRARIES} ${CURL_LIBRARIES} m)
 

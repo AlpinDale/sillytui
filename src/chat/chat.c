@@ -1,20 +1,18 @@
 #include "chat/chat.h"
+#include "core/platform.h"
 #include <ctype.h>
-#include <dirent.h>
 #include <errno.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/stat.h>
-#include <unistd.h>
 
 #define DEFAULT_CHAR_DIR "_default"
 
 static const char *get_chats_dir(void) {
   static char path[512] = {0};
   if (path[0] == '\0') {
-    const char *home = getenv("HOME");
+    const char *home = get_home_dir();
     if (home) {
       snprintf(path, sizeof(path), "%s/.config/sillytui/chats", home);
     }
@@ -67,7 +65,7 @@ static bool ensure_chats_dir(void) {
     return false;
 
   char parent[512];
-  snprintf(parent, sizeof(parent), "%s/.config/sillytui", getenv("HOME"));
+  snprintf(parent, sizeof(parent), "%s/.config/sillytui", get_home_dir());
   mkdir(parent, 0755);
   mkdir(dir, 0755);
   return true;

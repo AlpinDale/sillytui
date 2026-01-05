@@ -1,12 +1,13 @@
 #include "core/config.h"
+#include "core/platform.h"
 #include "tokenizer/selector.h"
 #include <errno.h>
-#include <pwd.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/stat.h>
-#include <unistd.h>
+#ifndef _WIN32
+#include <pwd.h>
+#endif
 
 static const char *API_TYPE_NAMES[] = {"openai",   "aphrodite", "vllm",
                                        "llamacpp", "koboldcpp", "tabby",
@@ -29,12 +30,14 @@ ApiType api_type_from_name(const char *name) {
 }
 
 static bool get_config_path(char *buf, size_t bufsize) {
-  const char *home = getenv("HOME");
+  const char *home = get_home_dir();
+#ifndef _WIN32
   if (!home) {
     struct passwd *pw = getpwuid(getuid());
     if (pw)
       home = pw->pw_dir;
   }
+#endif
   if (!home)
     return false;
   snprintf(buf, bufsize, "%s/.config/sillytui", home);
@@ -337,7 +340,7 @@ void config_set_active(ModelsFile *mf, size_t index) {
 static const char *get_settings_path(void) {
   static char path[512] = {0};
   if (path[0] == '\0') {
-    const char *home = getenv("HOME");
+    const char *home = get_home_dir();
     if (home) {
       snprintf(path, sizeof(path), "%s/.config/sillytui/settings.json", home);
     }

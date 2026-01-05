@@ -1,5 +1,6 @@
 #include "lorebook.h"
 #include "chat/history.h"
+#include "core/platform.h"
 #include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -355,7 +356,7 @@ static char *expand_path(const char *path) {
   if (!path)
     return NULL;
   if (path[0] == '~' && (path[1] == '/' || path[1] == '\0')) {
-    const char *home = getenv("HOME");
+    const char *home = get_home_dir();
     if (!home)
       return strdup(path);
     size_t home_len = strlen(home);

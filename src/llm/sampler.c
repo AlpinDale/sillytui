@@ -1,10 +1,11 @@
 #include "llm/sampler.h"
-#include <pwd.h>
+#include "core/platform.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/stat.h>
-#include <unistd.h>
+#ifndef _WIN32
+#include <pwd.h>
+#endif
 
 void sampler_init_defaults(SamplerSettings *s) {
   if (!s)
@@ -40,7 +41,7 @@ void sampler_init_defaults(SamplerSettings *s) {
 }
 
 static bool get_config_path(char *buf, size_t bufsize) {
-  const char *home = getenv("HOME");
+  const char *home = get_home_dir();
   if (!home) {
     struct passwd *pw = getpwuid(getuid());
     if (pw)

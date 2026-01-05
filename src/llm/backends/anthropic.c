@@ -3,6 +3,7 @@
 #include "character/persona.h"
 #include "core/config.h"
 #include "core/macros.h"
+#include "core/platform.h"
 #include "llm/common.h"
 #include <curl/curl.h>
 #include <stdbool.h>
@@ -21,7 +22,7 @@ typedef struct {
 
 static char *load_image_attachment_base64(const char *filename,
                                           const char **out_mime_type) {
-  const char *home = getenv("HOME");
+  const char *home = get_home_dir();
   if (!home)
     return NULL;
 

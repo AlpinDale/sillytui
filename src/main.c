@@ -6,10 +6,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/stat.h>
-#include <sys/time.h>
 #include <time.h>
-#include <unistd.h>
+#ifndef _WIN32
+#include <sys/time.h>
+#endif
 
 #include "character/character.h"
 #include "character/persona.h"
@@ -19,6 +19,7 @@
 #include "core/config.h"
 #include "core/log.h"
 #include "core/macros.h"
+#include "core/platform.h"
 #include "llm/llm.h"
 #include "llm/sampler.h"
 #include "lore/lorebook.h"
@@ -38,7 +39,7 @@ static const char *SPINNER_FRAMES[] = {"thinking", "thinking.", "thinking..",
 #define SPINNER_FRAME_COUNT 4
 
 static bool ensure_attachments_dir(void) {
-  const char *home = getenv("HOME");
+  const char *home = get_home_dir();
   if (!home)
     return false;
   char dir[512];
@@ -156,7 +157,7 @@ static bool save_attachment_to_list(const char *text, size_t text_len,
   if (!ensure_attachments_dir())
     return false;
 
-  const char *home = getenv("HOME");
+  const char *home = get_home_dir();
   if (!home)
     return false;
 
@@ -189,7 +190,7 @@ static char *expand_tilde_path(const char *path) {
   if (!path || path[0] != '~')
     return strdup(path);
 
-  const char *home = getenv("HOME");
+  const char *home = get_home_dir();
   if (!home)
     return strdup(path);
 
@@ -264,7 +265,7 @@ static bool attach_file_to_list(const char *filepath, AttachmentList *list,
   const char *basename = strrchr(expanded_path, '/');
   basename = basename ? basename + 1 : expanded_path;
 
-  const char *home = getenv("HOME");
+  const char *home = get_home_dir();
   if (!home) {
     if (error_msg)
       snprintf(error_msg, error_msg_size, "HOME not set");
@@ -344,7 +345,7 @@ static bool attach_file_to_list(const char *filepath, AttachmentList *list,
 static void delete_attachment_file(const char *filename) {
   if (!filename)
     return;
-  const char *home = getenv("HOME");
+  const char *home = get_home_dir();
   if (!home)
     return;
   char filepath[768];
