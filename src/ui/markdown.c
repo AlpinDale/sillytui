@@ -1,5 +1,6 @@
 #include "ui/markdown.h"
 #include "core/log.h"
+#include "ui/syntax/syntax_ncurses.h"
 #include <ctype.h>
 #include <stdlib.h>
 #include <string.h>
@@ -54,6 +55,8 @@ typedef struct {
 } RenderCtx;
 
 static bool g_supports_color = false;
+static bool g_code_block_is_c = false;
+static SyntaxHighlightState g_syntax_state;
 
 void markdown_init_colors(void) {
   if (!has_colors()) {
@@ -83,6 +86,10 @@ void markdown_init_colors(void) {
   init_pair(MD_PAIR_CODE_BLOCK_SEL, 252, MD_BG_SELECTED);
   init_pair(MD_PAIR_STRIKETHROUGH_SEL, 88, MD_BG_SELECTED);
   init_pair(MD_PAIR_HEADER_MARKER_SEL, 240, MD_BG_SELECTED);
+
+  syntax_init_colors();
+  syntax_highlight_init();
+  syntax_state_init(&g_syntax_state);
 
   g_supports_color = true;
 }
@@ -663,7 +670,15 @@ static void render_rp_text(RenderCtx *ctx, const char *text, size_t len) {
           continue;
         }
       }
-      // Just emit the character as-is (borders are drawn separately)
+      if (ctx->code_block_just_started) {
+        i = len;
+        continue;
+      }
+      if (g_code_block_is_c && g_supports_color) {
+        syntax_render_line(ctx->win, ctx->row, ctx->start_col + ctx->cursor,
+                           ctx->max_width - ctx->cursor, text, &g_syntax_state);
+        return;
+      }
       unsigned char uc = (unsigned char)ch;
       int char_len = utf8_char_len(uc);
       if (i + char_len > len) {
@@ -890,6 +905,10 @@ unsigned markdown_render_line_bg(WINDOW *win, int row, int start_col, int width,
             // We're in a code block, so these are CLOSING backticks
             code_block_ends = true;
             in_code_block = false;
+            if (g_code_block_is_c) {
+              g_code_block_is_c = false;
+              syntax_state_init(&g_syntax_state);
+            }
 #ifdef DEBUG_MARKDOWN
             log_message(LOG_DEBUG, __FILE__, __LINE__,
                         "MARKDOWN: Found CLOSING backticks "
@@ -899,6 +918,17 @@ unsigned markdown_render_line_bg(WINDOW *win, int row, int start_col, int width,
             // We're not in a code block, so these are OPENING backticks
             code_block_starts = true;
             in_code_block = true;
+            const char *lang = p + backticks;
+            while (*lang == ' ' || *lang == '\t')
+              lang++;
+            if ((*lang == 'c' || *lang == 'C') &&
+                (lang[1] == '\0' || lang[1] == '\n' || lang[1] == '\r' ||
+                 lang[1] == ' ' || lang[1] == '\t')) {
+              g_code_block_is_c = true;
+              syntax_state_init(&g_syntax_state);
+            } else {
+              g_code_block_is_c = false;
+            }
 #ifdef DEBUG_MARKDOWN
             log_message(LOG_DEBUG, __FILE__, __LINE__,
                         "MARKDOWN: Found OPENING backticks "
@@ -940,8 +970,10 @@ unsigned markdown_render_line_bg(WINDOW *win, int row, int start_col, int width,
 
   // Fill background
   if (in_code_block || code_block_starts || code_block_ends) {
-    // Code block background
-    if (g_supports_color) {
+    // Code block background - skip for C syntax highlighted blocks
+    if (g_code_block_is_c) {
+      mvwhline(win, row, start_col, ' ', width);
+    } else if (g_supports_color) {
       wattron(win, COLOR_PAIR(MD_PAIR_CODE_BLOCK));
       mvwhline(win, row, start_col, ' ', width);
       wattroff(win, COLOR_PAIR(MD_PAIR_CODE_BLOCK));

@@ -31,6 +31,9 @@ set(SOURCES
     src/ui/modal.c
     src/ui/markdown.c
     src/ui/console.c
+    src/ui/syntax/syntax_ncurses.c
+    src/ui/syntax/c/highlight.c
+    src/ui/syntax/c/hashtable.c
     src/chat/chat.c
     src/chat/history.c
     src/chat/author_note.c
@@ -92,6 +95,9 @@ set(TEST_SOURCES
     src/ui/ui.c
     src/ui/markdown.c
     src/ui/console.c
+    src/ui/syntax/syntax_ncurses.c
+    src/ui/syntax/c/highlight.c
+    src/ui/syntax/c/hashtable.c
     src/chat/chat.c
     src/character/character.c
     src/character/persona.c
@@ -138,6 +144,9 @@ set(INTEGRATION_TEST_SOURCES
     src/ui/ui.c
     src/ui/markdown.c
     src/ui/console.c
+    src/ui/syntax/syntax_ncurses.c
+    src/ui/syntax/c/highlight.c
+    src/ui/syntax/c/hashtable.c
 )
 
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "arm64|aarch64")
