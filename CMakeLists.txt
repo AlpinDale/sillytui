@@ -106,6 +106,7 @@ set(TEST_SOURCES
     tests/test_tokenizer.c
     tests/test_modal.c
     tests/test_attachments.c
+    tests/test_safetensors.cc
     src/core/config.c
     src/core/macros.c
     src/core/time.c
@@ -148,6 +149,7 @@ add_executable(run_tests ${TEST_SOURCES} ${ULIGHT_SOURCES})
 target_compile_definitions(run_tests PRIVATE _XOPEN_SOURCE_EXTENDED NCURSES_WIDECHAR=1)
 target_include_directories(run_tests PRIVATE ${CURSES_INCLUDE_DIR} src tests src/ui/syntax/ulight/include)
 target_link_libraries(run_tests PRIVATE ${CURSES_LIBRARIES} ${CURL_LIBRARIES} m)
+set_source_files_properties(tests/test_safetensors.cc PROPERTIES COMPILE_FLAGS "-Wno-error -Wno-ignored-qualifiers -Wno-unused-parameter -Wno-unused-variable")
 
 enable_testing()
 add_test(NAME unit_tests COMMAND run_tests)
@@ -210,6 +212,7 @@ set(ALL_TEST_SOURCES
     tests/test_robustness.c
     tests/test_lorebook.c
     tests/test_tokenizer_selector.c
+    tests/test_safetensors.cc
     tests/boundary/test_boundary.c
     tests/stress/test_stress.c
     tests/generated/test_unicode_gen.c
@@ -265,6 +268,7 @@ set_source_files_properties(${ULIGHT_SOURCES} PROPERTIES COMPILE_FLAGS "-Wno-tri
 target_compile_definitions(run_all_tests PRIVATE _XOPEN_SOURCE_EXTENDED NCURSES_WIDECHAR=1)
 target_include_directories(run_all_tests PRIVATE ${CURSES_INCLUDE_DIR} src tests tests/boundary tests/stress tests/generated tests/property src/ui/syntax/ulight/include)
 target_link_libraries(run_all_tests PRIVATE ${CURSES_LIBRARIES} ${CURL_LIBRARIES} m)
+set_source_files_properties(tests/test_safetensors.cc PROPERTIES COMPILE_FLAGS "-Wno-error -Wno-ignored-qualifiers -Wno-unused-parameter -Wno-unused-variable")
 
 add_test(NAME all_tests COMMAND run_all_tests)
 
