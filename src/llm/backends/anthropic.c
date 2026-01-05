@@ -5,7 +5,6 @@
 #include "core/macros.h"
 #include "core/platform.h"
 #include "llm/common.h"
-#include <curl/curl.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -13,6 +12,9 @@
 #include <string.h>
 
 #define ANTHROPIC_DEFAULT_CONTEXT_LENGTH 200000
+
+#ifdef CURL_FOUND
+#include <curl/curl.h>
 
 typedef struct {
   char *filename;
@@ -529,6 +531,36 @@ static void anthropic_add_headers(void *curl_handle,
 
   curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
 }
+
+#else
+
+static int anthropic_tokenize(const ModelConfig *config, const char *text) {
+  (void)config;
+  (void)text;
+  return 0;
+}
+
+static char *anthropic_build_request(const ModelConfig *config,
+                                     const ChatHistory *history,
+                                     const LLMContext *context) {
+  (void)config;
+  (void)history;
+  (void)context;
+  return NULL;
+}
+
+static void anthropic_parse_stream(StreamCtx *ctx, const char *line) {
+  (void)ctx;
+  (void)line;
+}
+
+static void anthropic_add_headers(void *curl_handle,
+                                  const ModelConfig *config) {
+  (void)curl_handle;
+  (void)config;
+}
+
+#endif
 
 const LLMBackend backend_anthropic = {
     .tokenize = anthropic_tokenize,

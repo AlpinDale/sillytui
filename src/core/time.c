@@ -1,7 +1,27 @@
 #include "core/time.h"
 #include <stdio.h>
-#include <sys/time.h>
 #include <time.h>
+#ifdef _WIN32
+#include <sys/time.h>
+#include <windows.h>
+
+static inline int gettimeofday_impl(struct timeval *tv, void *tz) {
+  (void)tz;
+  if (!tv)
+    return -1;
+  FILETIME ft;
+  GetSystemTimeAsFileTime(&ft);
+  unsigned long long time =
+      ((unsigned long long)ft.dwHighDateTime << 32) | ft.dwLowDateTime;
+  time /= 10;
+  tv->tv_sec = (long)(time / 1000000UL);
+  tv->tv_usec = (long)(time % 1000000UL);
+  return 0;
+}
+#define gettimeofday gettimeofday_impl
+#else
+#include <sys/time.h>
+#endif
 
 void get_timestamp(char *buf, size_t buf_size) {
   if (!buf || buf_size == 0)
@@ -10,7 +30,8 @@ void get_timestamp(char *buf, size_t buf_size) {
   struct timeval tv;
   gettimeofday(&tv, NULL);
 
-  struct tm *tm_info = localtime(&tv.tv_sec);
+  time_t tv_sec = (time_t)tv.tv_sec;
+  struct tm *tm_info = localtime(&tv_sec);
   if (!tm_info) {
     buf[0] = '\0';
     return;

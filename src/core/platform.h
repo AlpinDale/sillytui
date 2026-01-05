@@ -1,9 +1,13 @@
 #ifndef PLATFORM_H
 #define PLATFORM_H
 
+#include <stdlib.h>
+
 #ifdef _WIN32
 #include <direct.h>
 #include <io.h>
+#include <process.h>
+#include <stdio.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <windows.h>
@@ -11,8 +15,14 @@
 #define mkdir(path, mode) _mkdir(path)
 #define strcasecmp _stricmp
 #define stat _stat
+#define usleep(us) Sleep((us) / 1000)
+#define getpid _getpid
 #define PATH_SEPARATOR '\\'
 #define PATH_SEPARATOR_STR "\\"
+
+struct dirent {
+  char d_name[MAX_PATH];
+};
 
 typedef struct {
   HANDLE handle;
@@ -20,10 +30,6 @@ typedef struct {
   struct dirent current;
   int first;
 } DIR;
-
-struct dirent {
-  char d_name[MAX_PATH];
-};
 
 static inline DIR *opendir(const char *path) {
   DIR *dir = (DIR *)malloc(sizeof(DIR));
@@ -68,26 +74,9 @@ static inline int closedir(DIR *dir) {
   return 0;
 }
 
+#ifndef S_ISDIR
 #define S_ISDIR(m) (((m) & _S_IFMT) == _S_IFDIR)
-
-struct timeval {
-  long tv_sec;
-  long tv_usec;
-};
-
-static inline int gettimeofday(struct timeval *tv, void *tz) {
-  (void)tz;
-  if (!tv)
-    return -1;
-  FILETIME ft;
-  GetSystemTimeAsFileTime(&ft);
-  unsigned long long time =
-      ((unsigned long long)ft.dwHighDateTime << 32) | ft.dwLowDateTime;
-  time /= 10;
-  tv->tv_sec = (long)(time / 1000000UL);
-  tv->tv_usec = (long)(time % 1000000UL);
-  return 0;
-}
+#endif
 
 #else
 #include <dirent.h>
@@ -97,8 +86,6 @@ static inline int gettimeofday(struct timeval *tv, void *tz) {
 #define PATH_SEPARATOR '/'
 #define PATH_SEPARATOR_STR "/"
 #endif
-
-#include <stdlib.h>
 
 static inline const char *get_home_dir(void) {
 #ifdef _WIN32

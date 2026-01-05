@@ -1,22 +1,36 @@
 #include "llm/llm.h"
 #include "llm/backends/backend.h"
 #include "llm/common.h"
-#include <curl/curl.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifdef CURL_FOUND
+#include <curl/curl.h>
+#endif
+#ifndef _WIN32
 #include <sys/time.h>
+#endif
 
-void llm_init(void) { curl_global_init(CURL_GLOBAL_DEFAULT); }
+void llm_init(void) {
+#ifdef CURL_FOUND
+  curl_global_init(CURL_GLOBAL_DEFAULT);
+#endif
+}
 
-void llm_cleanup(void) { curl_global_cleanup(); }
+void llm_cleanup(void) {
+#ifdef CURL_FOUND
+  curl_global_cleanup();
+#endif
+}
 
 int llm_estimate_tokens(const char *text) {
   if (!text)
     return 0;
   return (int)(strlen(text) / 4);
 }
+
+#ifdef CURL_FOUND
 
 const LLMBackend *backend_get(ApiType type) {
   switch (type) {
@@ -345,6 +359,7 @@ LLMResponse llm_chat(const ModelConfig *config, const ChatHistory *history,
   resp.completion_tokens = ctx.completion_tokens;
   resp.elapsed_ms = elapsed_ms;
 
+#ifndef _WIN32
   if (ctx.has_first_token && ctx.completion_tokens > 0) {
     double output_time_ms =
         (ctx.last_token_time.tv_sec - ctx.first_token_time.tv_sec) * 1000.0 +
@@ -353,6 +368,7 @@ LLMResponse llm_chat(const ModelConfig *config, const ChatHistory *history,
       resp.output_tps = (ctx.completion_tokens * 1000.0) / output_time_ms;
     }
   }
+#endif
 
   curl_slist_free_all(headers);
   curl_easy_cleanup(curl);
@@ -360,6 +376,54 @@ LLMResponse llm_chat(const ModelConfig *config, const ChatHistory *history,
 
   return resp;
 }
+
+#else
+
+const LLMBackend *backend_get(ApiType type) {
+  switch (type) {
+  case API_TYPE_ANTHROPIC:
+    return &backend_anthropic;
+  case API_TYPE_KOBOLDCPP:
+  case API_TYPE_APHRODITE:
+  case API_TYPE_VLLM:
+  case API_TYPE_LLAMACPP:
+  case API_TYPE_TABBY:
+    return &backend_kobold;
+  case API_TYPE_OPENAI:
+  default:
+    return &backend_openai;
+  }
+}
+
+int llm_tokenize(const ModelConfig *config, const char *text) {
+  (void)config;
+  return llm_estimate_tokens(text);
+}
+
+void process_sse_line(StreamCtx *ctx, const char *line, bool is_anthropic) {
+  (void)ctx;
+  (void)line;
+  (void)is_anthropic;
+}
+
+LLMResponse llm_chat(const ModelConfig *config, const ChatHistory *history,
+                     const LLMContext *context, LLMStreamCallback stream_cb,
+                     LLMReasoningCallback reasoning_cb,
+                     LLMProgressCallback progress_cb, void *userdata) {
+  (void)history;
+  (void)context;
+  (void)stream_cb;
+  (void)reasoning_cb;
+  (void)progress_cb;
+  (void)userdata;
+  LLMResponse resp = {0};
+  snprintf(resp.error, sizeof(resp.error), "CURL not available");
+  if (config) {
+  }
+  return resp;
+}
+
+#endif
 
 void llm_response_free(LLMResponse *resp) {
   free(resp->content);

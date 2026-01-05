@@ -192,8 +192,12 @@ static int utf8_char_len(unsigned char c) {
 static int utf8_display_width(const char *str, int byte_len) {
   wchar_t wc;
   if (mbtowc(&wc, str, byte_len) > 0) {
+#ifndef _WIN32
     int w = wcwidth(wc);
     return w > 0 ? w : 1;
+#else
+    return 1;
+#endif
   }
   return 1;
 }

@@ -21,23 +21,46 @@ endif()
 
 # Curses library setup
 if(WIN32)
-    # Use PDCursesMod for Windows
-    set(PDC_BUILD_SHARED OFF CACHE BOOL "Build static PDCurses" FORCE)
-    set(PDC_UTF8 ON CACHE BOOL "Force UTF-8 mode" FORCE)
-    set(PDC_SDL2_BUILD OFF CACHE BOOL "Don't build SDL2 backend" FORCE)
-    set(PDC_SDL2_DEPS_BUILD OFF CACHE BOOL "Don't build SDL2 deps" FORCE)
-    set(PDC_GL_BUILD OFF CACHE BOOL "Don't build GL backend" FORCE)
+    # Build PDCursesMod VT backend manually
+    file(GLOB PDCURSES_CORE_SOURCES 
+        "${CMAKE_SOURCE_DIR}/third-party/PDCursesMod/pdcurses/*.c")
+    set(PDCURSES_VT_SOURCES
+        "${CMAKE_SOURCE_DIR}/third-party/PDCursesMod/vt/pdcclip.c"
+        "${CMAKE_SOURCE_DIR}/third-party/PDCursesMod/vt/pdcdisp.c"
+        "${CMAKE_SOURCE_DIR}/third-party/PDCursesMod/vt/pdcgetsc.c"
+        "${CMAKE_SOURCE_DIR}/third-party/PDCursesMod/vt/pdckbd.c"
+        "${CMAKE_SOURCE_DIR}/third-party/PDCursesMod/vt/pdcscrn.c"
+        "${CMAKE_SOURCE_DIR}/third-party/PDCursesMod/vt/pdcsetsc.c"
+        "${CMAKE_SOURCE_DIR}/third-party/PDCursesMod/vt/pdcutil.c"
+    )
     
-    add_subdirectory(third-party/PDCursesMod EXCLUDE_FROM_ALL)
+    add_library(pdcurses_vt STATIC ${PDCURSES_CORE_SOURCES} ${PDCURSES_VT_SOURCES})
+    target_include_directories(pdcurses_vt PUBLIC 
+        "${CMAKE_SOURCE_DIR}/third-party/PDCursesMod"
+        "${CMAKE_SOURCE_DIR}/third-party/PDCursesMod/vt"
+    )
+    target_compile_definitions(pdcurses_vt PUBLIC PDC_FORCE_UTF8)
     
-    # PDCursesMod creates vt_pdcursesstatic target
-    set(CURSES_LIBRARIES vt_pdcursesstatic)
+    set(CURSES_LIBRARIES pdcurses_vt)
     set(CURSES_INCLUDE_DIR ${CMAKE_SOURCE_DIR}/third-party/PDCursesMod)
 else()
     find_package(Curses REQUIRED)
 endif()
 
-find_package(CURL REQUIRED)
+if(WIN32)
+    # For Windows cross-compile, CURL is optional (can be added later)
+    find_package(CURL)
+    if(CURL_FOUND)
+        add_compile_definitions(CURL_FOUND=1)
+    else()
+        message(WARNING "CURL not found - LLM API features will not work")
+        set(CURL_LIBRARIES "")
+        set(CURL_INCLUDE_DIRS "")
+    endif()
+else()
+    find_package(CURL REQUIRED)
+    add_compile_definitions(CURL_FOUND=1)
+endif()
 
 set(ULIGHT_SOURCES
     src/ui/syntax/ulight/chars.cpp
@@ -170,6 +193,7 @@ if(NOT WIN32)
     endif()
 endif()
 
+if(NOT WIN32)
 add_executable(run_tests ${TEST_SOURCES} ${ULIGHT_SOURCES})
 if(WIN32)
     target_compile_definitions(run_tests PRIVATE PDC_FORCE_UTF8)
@@ -181,6 +205,7 @@ target_link_libraries(run_tests PRIVATE ${CURSES_LIBRARIES} ${CURL_LIBRARIES} m)
 
 enable_testing()
 add_test(NAME unit_tests COMMAND run_tests)
+endif()
 
 set(INTEGRATION_TEST_SOURCES
     tests/integration/run_integration_tests.c
@@ -222,6 +247,7 @@ if(NOT WIN32)
     endif()
 endif()
 
+if(NOT WIN32)
 add_executable(run_integration_tests ${INTEGRATION_TEST_SOURCES} ${ULIGHT_SOURCES})
 if(WIN32)
     target_compile_definitions(run_integration_tests PRIVATE PDC_FORCE_UTF8)
@@ -232,6 +258,7 @@ target_include_directories(run_integration_tests PRIVATE ${CURSES_INCLUDE_DIR} s
 target_link_libraries(run_integration_tests PRIVATE ${CURSES_LIBRARIES} ${CURL_LIBRARIES} m)
 
 add_test(NAME integration_tests COMMAND run_integration_tests)
+endif()
 
 set(ALL_TEST_SOURCES
     tests/run_all_tests.c
@@ -296,6 +323,7 @@ if(NOT WIN32)
     endif()
 endif()
 
+if(NOT WIN32)
 add_executable(run_all_tests ${ALL_TEST_SOURCES} ${ULIGHT_SOURCES})
 
 set_source_files_properties(${ULIGHT_SOURCES} PROPERTIES COMPILE_FLAGS "-Wno-trigraphs")
@@ -309,6 +337,7 @@ target_include_directories(run_all_tests PRIVATE ${CURSES_INCLUDE_DIR} src tests
 target_link_libraries(run_all_tests PRIVATE ${CURSES_LIBRARIES} ${CURL_LIBRARIES} m)
 
 add_test(NAME all_tests COMMAND run_all_tests)
+endif()
 
 option(ENABLE_COVERAGE "Enable code coverage" OFF)
 if(ENABLE_COVERAGE)

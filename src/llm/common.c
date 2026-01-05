@@ -170,6 +170,7 @@ void append_to_reasoning(LLMResponse *resp, const char *data, size_t len) {
   resp->reasoning[resp->reasoning_len] = '\0';
 }
 
+#ifdef CURL_FOUND
 size_t stream_callback(char *ptr, size_t size, size_t nmemb, void *userdata) {
   StreamCtx *ctx = userdata;
   size_t bytes = size * nmemb;
@@ -192,8 +193,8 @@ size_t stream_callback(char *ptr, size_t size, size_t nmemb, void *userdata) {
   return bytes;
 }
 
-int progress_callback(void *clientp, curl_off_t dltotal, curl_off_t dlnow,
-                      curl_off_t ultotal, curl_off_t ulnow) {
+int progress_callback(void *clientp, llm_off_t dltotal, llm_off_t dlnow,
+                      llm_off_t ultotal, llm_off_t ulnow) {
   (void)dltotal;
   (void)dlnow;
   (void)ultotal;
@@ -204,6 +205,25 @@ int progress_callback(void *clientp, curl_off_t dltotal, curl_off_t dlnow,
   }
   return 0;
 }
+#else
+size_t stream_callback(char *ptr, size_t size, size_t nmemb, void *userdata) {
+  (void)ptr;
+  (void)size;
+  (void)nmemb;
+  (void)userdata;
+  return 0;
+}
+
+int progress_callback(void *clientp, llm_off_t dltotal, llm_off_t dlnow,
+                      llm_off_t ultotal, llm_off_t ulnow) {
+  (void)clientp;
+  (void)dltotal;
+  (void)dlnow;
+  (void)ultotal;
+  (void)ulnow;
+  return 0;
+}
+#endif
 
 ExampleMessage *parse_mes_example(const char *mes_example, size_t *out_count,
                                   const char *char_name,

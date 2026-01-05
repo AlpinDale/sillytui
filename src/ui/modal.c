@@ -3,9 +3,11 @@
 #include "tokenizer/selector.h"
 #include "ui/ui.h"
 #include <ctype.h>
-#include <curl/curl.h>
 #include <stdlib.h>
 #include <string.h>
+#ifdef CURL_FOUND
+#include <curl/curl.h>
+#endif
 
 static const char *get_default_base_url(ApiType type) {
   switch (type) {
@@ -66,6 +68,7 @@ typedef struct {
   size_t cap;
 } FetchBuffer;
 
+#ifdef CURL_FOUND
 static size_t fetch_write_callback(char *ptr, size_t size, size_t nmemb,
                                    void *userdata) {
   FetchBuffer *buf = userdata;
@@ -218,6 +221,12 @@ static bool fetch_models_from_api(Modal *m) {
 
   return m->fetched_models_count > 0;
 }
+#else
+static bool fetch_models_from_api(Modal *m) {
+  (void)m;
+  return false;
+}
+#endif
 
 void modal_init(Modal *m) {
   memset(m, 0, sizeof(*m));

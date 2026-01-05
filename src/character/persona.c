@@ -9,11 +9,13 @@
 
 static bool get_persona_path(char *buf, size_t bufsize) {
   const char *home = get_home_dir();
+#ifndef _WIN32
   if (!home) {
     struct passwd *pw = getpwuid(getuid());
     if (pw)
       home = pw->pw_dir;
   }
+#endif
   if (!home)
     return false;
   snprintf(buf, bufsize, "%s/.config/sillytui/persona.json", home);

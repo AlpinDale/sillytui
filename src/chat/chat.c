@@ -1159,8 +1159,9 @@ bool chat_character_list_load(ChatCharacterList *list) {
         size_t namelen = strlen(chat_entry->d_name);
         if (namelen >= 6 &&
             strcmp(chat_entry->d_name + namelen - 5, ".json") == 0) {
-          snprintf(first_chat_path, sizeof(first_chat_path), "%s/%s",
-                   subdir_path, chat_entry->d_name);
+          int written = snprintf(first_chat_path, sizeof(first_chat_path),
+                                 "%s/%s", subdir_path, chat_entry->d_name);
+          (void)written;
           break;
         }
       }

@@ -4,11 +4,15 @@
 #include "core/config.h"
 #include "core/macros.h"
 #include "llm/common.h"
-#include <curl/curl.h>
+#include "lore/lorebook.h"
+#include <ctype.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+#ifdef CURL_FOUND
+#include <curl/curl.h>
 
 static int kobold_tokenize(const ModelConfig *config, const char *text) {
   (void)config;
@@ -429,6 +433,35 @@ static void kobold_add_headers(void *curl_handle, const ModelConfig *config) {
 
   curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
 }
+
+#else
+
+static int kobold_tokenize(const ModelConfig *config, const char *text) {
+  (void)config;
+  (void)text;
+  return 0;
+}
+
+static char *kobold_build_request(const ModelConfig *config,
+                                  const ChatHistory *history,
+                                  const LLMContext *context) {
+  (void)config;
+  (void)history;
+  (void)context;
+  return NULL;
+}
+
+static void kobold_parse_stream(StreamCtx *ctx, const char *line) {
+  (void)ctx;
+  (void)line;
+}
+
+static void kobold_add_headers(void *curl_handle, const ModelConfig *config) {
+  (void)curl_handle;
+  (void)config;
+}
+
+#endif
 
 const LLMBackend backend_kobold = {
     .tokenize = kobold_tokenize,

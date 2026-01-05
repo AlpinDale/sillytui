@@ -2,8 +2,15 @@
 #define LLM_COMMON_H
 
 #include "llm/backends/backend.h"
-#include <curl/curl.h>
 #include <stddef.h>
+#include <stdint.h>
+
+#ifdef CURL_FOUND
+#include <curl/curl.h>
+typedef curl_off_t llm_off_t;
+#else
+typedef int64_t llm_off_t;
+#endif
 
 typedef struct {
   char *data;
@@ -41,7 +48,7 @@ void append_to_response(LLMResponse *resp, const char *data, size_t len);
 void append_to_reasoning(LLMResponse *resp, const char *data, size_t len);
 
 size_t stream_callback(char *ptr, size_t size, size_t nmemb, void *userdata);
-int progress_callback(void *clientp, curl_off_t dltotal, curl_off_t dlnow,
-                      curl_off_t ultotal, curl_off_t ulnow);
+int progress_callback(void *clientp, llm_off_t dltotal, llm_off_t dlnow,
+                      llm_off_t ultotal, llm_off_t ulnow);
 
 #endif

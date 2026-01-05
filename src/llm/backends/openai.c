@@ -5,12 +5,14 @@
 #include "core/macros.h"
 #include "core/platform.h"
 #include "llm/common.h"
-#include <curl/curl.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+#ifdef CURL_FOUND
+#include <curl/curl.h>
 
 static char *load_image_attachment_base64(const char *filename,
                                           const char **out_mime_type) {
@@ -725,6 +727,35 @@ static void openai_add_headers(void *curl_handle, const ModelConfig *config) {
 
   curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
 }
+
+#else
+
+static int openai_tokenize(const ModelConfig *config, const char *text) {
+  (void)config;
+  (void)text;
+  return 0;
+}
+
+static char *openai_build_request(const ModelConfig *config,
+                                  const ChatHistory *history,
+                                  const LLMContext *context) {
+  (void)config;
+  (void)history;
+  (void)context;
+  return NULL;
+}
+
+static void openai_parse_stream(StreamCtx *ctx, const char *line) {
+  (void)ctx;
+  (void)line;
+}
+
+static void openai_add_headers(void *curl_handle, const ModelConfig *config) {
+  (void)curl_handle;
+  (void)config;
+}
+
+#endif
 
 const LLMBackend backend_openai = {
     .tokenize = openai_tokenize,

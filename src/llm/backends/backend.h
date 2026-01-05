@@ -63,9 +63,11 @@ typedef struct {
   int prompt_tokens;
   int completion_tokens;
   bool is_anthropic;
+#ifndef _WIN32
   struct timeval first_token_time;
   struct timeval last_token_time;
   struct timeval reasoning_start_time;
+#endif
   bool has_first_token;
 } StreamCtx;
 

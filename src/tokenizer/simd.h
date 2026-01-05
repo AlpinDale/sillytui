@@ -5,7 +5,10 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#if defined(__aarch64__) || defined(_M_ARM64)
+#if defined(_WIN32) || defined(__MINGW32__) || defined(__MINGW64__)
+#define SIMD_ARM64 0
+#define SIMD_X86_64 0
+#elif defined(__aarch64__) || defined(_M_ARM64)
 #define SIMD_ARM64 1
 #define SIMD_X86_64 0
 #elif defined(__x86_64__) || defined(_M_X64)
