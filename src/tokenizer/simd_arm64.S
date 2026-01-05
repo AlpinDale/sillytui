@@ -4,6 +4,7 @@
 #define SYMBOL(name) _##name
 #else
 #define SYMBOL(name) name
+.arch_extension crc
 #endif
 
 .text
