@@ -11,6 +11,7 @@ Still in development.
 ### Requirements
 - ncurses
 - curl
+- GCC 13+ or Clang 16+ (for C++23 support)
 
 ### Installation & Usage
 
@@ -32,6 +33,15 @@ TODO
 sudo apt update && sudo apt install -y build-essential cmake libncursesw5-dev libcurl4-openssl-dev
 git clone https://github.com/AlpinDale/sillytui.git && cd sillytui
 make run
+```
+
+If you're using older GCC versions, you will need to do this first (ubuntu):
+
+```bash
+sudo add-apt-repository ppa:ubuntu-toolchain-r/test
+sudo apt update
+sudo apt install gcc-13 g++-13
+./tools/setup_gcc13.sh
 ```
 
 #### Arch Linux

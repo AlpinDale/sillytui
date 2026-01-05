@@ -5,6 +5,13 @@ set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+    if(CMAKE_CXX_COMPILER_VERSION VERSION_LESS "13.0")
+        message(FATAL_ERROR "GCC version 13.0 or later is required for C++23 support. Found: ${CMAKE_CXX_COMPILER_VERSION}\n"
+                "Please upgrade GCC or use Clang 16+")
+    endif()
+endif()
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 add_compile_options(-Wall -Wextra -Werror)
