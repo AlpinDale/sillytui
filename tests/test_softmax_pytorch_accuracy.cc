@@ -24,7 +24,7 @@ static float bf16_to_float(uint16_t bf16) {
   return result;
 }
 
-static uint16_t float_to_bf16(float f) {
+__attribute__((unused)) static uint16_t float_to_bf16(float f) {
   uint32_t bits;
   memcpy(&bits, &f, sizeof(float));
   return (uint16_t)(bits >> 16);
@@ -49,7 +49,7 @@ static float fp16_to_float(uint16_t fp16) {
   return result;
 }
 
-static uint16_t float_to_fp16(float f) {
+__attribute__((unused)) static uint16_t float_to_fp16(float f) {
   uint32_t bits;
   memcpy(&bits, &f, sizeof(float));
   uint32_t sign = (bits >> 16) & 0x8000;
@@ -167,7 +167,7 @@ static double compute_max_rel_error(const float *computed,
   return max_err;
 }
 
-static void run_softmax_f32_test(const char *test_name, const char *case_name) {
+static void run_softmax_f32_test(const char *case_name) {
   if (!load_reference_data()) {
     ASSERT(false);
     return;
@@ -271,17 +271,17 @@ static void run_softmax_f16_test(const char *case_name) {
   ASSERT_LT(max_err, 0.01);
 }
 
-TEST(softmax_pytorch_f32_small) { run_softmax_f32_test("small", "small"); }
-TEST(softmax_pytorch_f32_medium) { run_softmax_f32_test("medium", "medium"); }
-TEST(softmax_pytorch_f32_large) { run_softmax_f32_test("large", "large"); }
+TEST(softmax_pytorch_f32_small) { run_softmax_f32_test("small"); }
+TEST(softmax_pytorch_f32_medium) { run_softmax_f32_test("medium"); }
+TEST(softmax_pytorch_f32_large) { run_softmax_f32_test("large"); }
 TEST(softmax_pytorch_f32_attention_128) {
-  run_softmax_f32_test("attention_128", "attention_128");
+  run_softmax_f32_test("attention_128");
 }
 TEST(softmax_pytorch_f32_attention_512) {
-  run_softmax_f32_test("attention_512", "attention_512");
+  run_softmax_f32_test("attention_512");
 }
 TEST(softmax_pytorch_f32_attention_2048) {
-  run_softmax_f32_test("attention_2048", "attention_2048");
+  run_softmax_f32_test("attention_2048");
 }
 
 TEST(softmax_pytorch_f32_scaled) {

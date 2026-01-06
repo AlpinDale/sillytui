@@ -3960,7 +3960,7 @@ struct safetensors_mmap {
   std::string _warn;
   std::string _err;
 
-  const bool is_valid() const { return _valid; }
+  bool is_valid() const { return _valid; }
 
   const std::string &get_error() const { return _err; }
 
@@ -4288,8 +4288,8 @@ uint16_t float_to_half_full_le(float _f) {
 }
 
 bool parse_safetensors_header(const uint8_t *addr, const size_t nbytes,
-                              const std::string &filename, safetensors_t *st,
-                              std::string *warn, std::string *err) {
+                              const std::string & /* filename */, safetensors_t *st,
+                              std::string * /* warn */, std::string *err) {
   if (nbytes < 16) {
     if (err) {
       (*err) += "Size is too short.\n";
@@ -4537,8 +4537,6 @@ bool mmap_from_memory(const uint8_t *addr, const size_t nbytes,
     return false;
   }
 
-  size_t databuffer_size = nbytes - st->header_size - 8;
-
   st->mmaped = true;
 
   st->mmap_addr = addr;
@@ -4745,7 +4743,7 @@ bool validate_data_offsets(const safetensors_t &st, std::string &err) {
 }
 
 bool save_to_memory(const safetensors_t &st, std::vector<uint8_t> *dst,
-                    std::string *warn, std::string *err) {
+                    std::string * /* warn */, std::string *err) {
   // directly serialize JSON string.
   std::stringstream ss;
 
