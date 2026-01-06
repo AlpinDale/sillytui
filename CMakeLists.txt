@@ -104,6 +104,8 @@ set(SOURCES
     src/inference/kernels/attention/attention_neon.c
     src/inference/kernels/embedding/embedding.c
     src/inference/kernels/embedding/embedding_neon.c
+    src/inference/kernels/sampling/sampling.c
+    src/inference/kernels/sampling/sampling_neon.c
 )
 
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "arm64|aarch64")
@@ -150,6 +152,8 @@ set(TEST_SOURCES
     tests/test_attention.cc
     tests/test_embedding.cc
     tests/test_embedding_pytorch_accuracy.cc
+    tests/test_sampling.cc
+    tests/test_sampling_pytorch_accuracy.cc
     src/core/config.c
     src/core/macros.c
     src/core/time.c
@@ -184,6 +188,8 @@ set(TEST_SOURCES
     src/inference/kernels/attention/attention_neon.c
     src/inference/kernels/embedding/embedding.c
     src/inference/kernels/embedding/embedding_neon.c
+    src/inference/kernels/sampling/sampling.c
+    src/inference/kernels/sampling/sampling_neon.c
     src/ui/modal.c
     src/ui/ui.c
     src/ui/markdown.c
@@ -297,6 +303,8 @@ set(ALL_TEST_SOURCES
     tests/test_attention.cc
     tests/test_embedding.cc
     tests/test_embedding_pytorch_accuracy.cc
+    tests/test_sampling.cc
+    tests/test_sampling_pytorch_accuracy.cc
     tests/boundary/test_boundary.c
     tests/stress/test_stress.c
     tests/generated/test_unicode_gen.c
@@ -344,6 +352,10 @@ set(ALL_TEST_SOURCES
     src/inference/kernels/softmax/softmax_neon.c
     src/inference/kernels/attention/attention.c
     src/inference/kernels/attention/attention_neon.c
+    src/inference/kernels/embedding/embedding.c
+    src/inference/kernels/embedding/embedding_neon.c
+    src/inference/kernels/sampling/sampling.c
+    src/inference/kernels/sampling/sampling_neon.c
     src/ui/modal.c
     src/ui/ui.c
     src/ui/markdown.c
@@ -488,4 +500,10 @@ if(EXISTS "${CMAKE_SOURCE_DIR}/bench/bench_embedding.c")
   add_executable(bench_embedding bench/bench_embedding.c src/inference/kernels/embedding/embedding.c src/inference/kernels/embedding/embedding_neon.c)
   target_include_directories(bench_embedding PRIVATE src)
   target_compile_options(bench_embedding PRIVATE -O3 -ffast-math)
+endif()
+
+if(EXISTS "${CMAKE_SOURCE_DIR}/bench/bench_sampling.c")
+  add_executable(bench_sampling bench/bench_sampling.c src/inference/kernels/sampling/sampling.c src/inference/kernels/sampling/sampling_neon.c)
+  target_include_directories(bench_sampling PRIVATE src)
+  target_compile_options(bench_sampling PRIVATE -O3 -ffast-math)
 endif()

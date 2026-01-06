@@ -27,6 +27,8 @@ extern void run_softmax_pytorch_tests(void);
 extern void run_attention_tests(void);
 extern void run_embedding_tests(void);
 extern void run_embedding_pytorch_tests(void);
+extern void run_sampling_tests(void);
+extern void run_sampling_pytorch_tests(void);
 
 int main(int argc, char **argv) {
   (void)argc;
@@ -62,6 +64,8 @@ int main(int argc, char **argv) {
   run_attention_tests();
   run_embedding_tests();
   run_embedding_pytorch_tests();
+  run_sampling_tests();
+  run_sampling_pytorch_tests();
 
   print_test_summary();
 
