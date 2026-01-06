@@ -193,12 +193,12 @@ void gemm_f32(const float *A, const float *B, float *C, int M, int N, int K,
 #ifdef HAS_ACCELERATE
   enum CBLAS_TRANSPOSE transA = transpose_A ? CblasTrans : CblasNoTrans;
   enum CBLAS_TRANSPOSE transB = transpose_B ? CblasTrans : CblasNoTrans;
-  int lda = transpose_B ? K : N;
-  int ldb = transpose_A ? M : K;
+  int lda = transpose_A ? M : K;
+  int ldb = transpose_B ? K : N;
   int ldc = N;
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
-  cblas_sgemm(CblasColMajor, transB, transA, N, M, K, 1.0f, B, lda, A, ldb,
+  cblas_sgemm(CblasRowMajor, transA, transB, M, N, K, 1.0f, A, lda, B, ldb,
               0.0f, C, ldc);
 #pragma clang diagnostic pop
   return;

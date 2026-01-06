@@ -108,6 +108,12 @@ set(SOURCES
     src/inference/kernels/sampling/sampling_neon.c
     src/inference/kernels/kv_cache/kv_cache.c
     src/inference/kernels/kv_cache/kv_cache_neon.c
+    src/inference/model/config.c
+    src/inference/model/weights.c
+    src/inference/model/ffn.c
+    src/inference/model/attention_layer.c
+    src/inference/model/transformer_layer.c
+    src/inference/model/qwen3.c
 )
 
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "arm64|aarch64")
@@ -434,6 +440,58 @@ target_compile_options(load_model PRIVATE
     -Wno-unused-variable
     -Wno-error
 )
+
+add_executable(qwen3_inference 
+    examples/qwen3_inference.c
+    src/inference/model/config.c
+    src/inference/model/weights.c
+    src/inference/model/ffn.c
+    src/inference/model/attention_layer.c
+    src/inference/model/transformer_layer.c
+    src/inference/model/qwen3.c
+    src/inference/tokenizer/gpt2bpe.c
+    src/inference/tokenizer/simd.c
+    src/inference/tokenizer/unicode_tables.c
+    src/inference/kernels/gemm/gemm.c
+    src/inference/kernels/gemm/gemm_neon.c
+    src/inference/kernels/gemm/gemm_amx.c
+    src/inference/kernels/norm/layernorm.c
+    src/inference/kernels/norm/layernorm_neon.c
+    src/inference/kernels/activation/activation.c
+    src/inference/kernels/activation/activation_neon.c
+    src/inference/kernels/rope/rope.c
+    src/inference/kernels/rope/rope_neon.c
+    src/inference/kernels/embedding/embedding.c
+    src/inference/kernels/embedding/embedding_neon.c
+    src/inference/kernels/attention/attention.c
+    src/inference/kernels/attention/attention_neon.c
+    src/inference/kernels/kv_cache/kv_cache.c
+    src/inference/kernels/kv_cache/kv_cache_neon.c
+    src/inference/kernels/sampling/sampling.c
+    src/inference/kernels/sampling/sampling_neon.c
+)
+set_source_files_properties(src/inference/model/weights.c PROPERTIES
+    COMPILE_FLAGS "-x c++ -std=c++11"
+    LANGUAGE CXX
+)
+target_include_directories(qwen3_inference PRIVATE src)
+target_compile_options(qwen3_inference PRIVATE 
+    -Wno-ignored-qualifiers 
+    -Wno-unused-parameter 
+    -Wno-unused-variable
+    -Wno-error
+    -std=c11
+)
+target_link_libraries(qwen3_inference PRIVATE Threads::Threads)
+if(APPLE)
+    target_link_libraries(qwen3_inference PRIVATE "-framework Accelerate")
+endif()
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "arm64|aarch64")
+    target_sources(qwen3_inference PRIVATE src/inference/tokenizer/simd_arm64.S)
+elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
+    enable_language(ASM)
+    target_sources(qwen3_inference PRIVATE src/inference/tokenizer/simd_x86_64.S)
+endif()
 
 if(EXISTS "${CMAKE_SOURCE_DIR}/bench/bench_gemm.c")
   add_executable(bench_gemm bench/bench_gemm.c src/inference/kernels/gemm/gemm.c src/inference/kernels/gemm/gemm_neon.c src/inference/kernels/gemm/gemm_amx.c)
