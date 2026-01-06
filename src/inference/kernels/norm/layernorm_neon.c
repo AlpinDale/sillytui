@@ -2,7 +2,7 @@
  * ARM NEON optimized layernorm kernels
  */
 
-#include "inference/linalg/norm/layernorm_kernels.h"
+#include "inference/kernels/norm/layernorm_kernels.h"
 #include <math.h>
 #include <string.h>
 

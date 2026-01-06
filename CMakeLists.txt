@@ -89,15 +89,15 @@ set(SOURCES
     src/inference/tokenizer/selector.c
     src/inference/tokenizer/simd.c
     src/inference/tokenizer/unicode_tables.c
-    src/inference/linalg/gemm/gemm.c
-    src/inference/linalg/gemm/gemm_neon.c
-    src/inference/linalg/gemm/gemm_amx.c
-    src/inference/linalg/norm/layernorm.c
-    src/inference/linalg/norm/layernorm_neon.c
-    src/inference/linalg/activation/activation.c
-    src/inference/linalg/activation/activation_neon.c
-    src/inference/linalg/rope/rope.c
-    src/inference/linalg/rope/rope_neon.c
+    src/inference/kernels/gemm/gemm.c
+    src/inference/kernels/gemm/gemm_neon.c
+    src/inference/kernels/gemm/gemm_amx.c
+    src/inference/kernels/norm/layernorm.c
+    src/inference/kernels/norm/layernorm_neon.c
+    src/inference/kernels/activation/activation.c
+    src/inference/kernels/activation/activation_neon.c
+    src/inference/kernels/rope/rope.c
+    src/inference/kernels/rope/rope_neon.c
 )
 
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "arm64|aarch64")
@@ -158,15 +158,15 @@ set(TEST_SOURCES
     src/inference/tokenizer/selector.c
     src/inference/tokenizer/gpt2bpe.c
     src/inference/tokenizer/sentencepiece.c
-    src/inference/linalg/gemm/gemm.c
-    src/inference/linalg/gemm/gemm_neon.c
-    src/inference/linalg/gemm/gemm_amx.c
-    src/inference/linalg/norm/layernorm.c
-    src/inference/linalg/norm/layernorm_neon.c
-    src/inference/linalg/activation/activation.c
-    src/inference/linalg/activation/activation_neon.c
-    src/inference/linalg/rope/rope.c
-    src/inference/linalg/rope/rope_neon.c
+    src/inference/kernels/gemm/gemm.c
+    src/inference/kernels/gemm/gemm_neon.c
+    src/inference/kernels/gemm/gemm_amx.c
+    src/inference/kernels/norm/layernorm.c
+    src/inference/kernels/norm/layernorm_neon.c
+    src/inference/kernels/activation/activation.c
+    src/inference/kernels/activation/activation_neon.c
+    src/inference/kernels/rope/rope.c
+    src/inference/kernels/rope/rope_neon.c
     src/ui/modal.c
     src/ui/ui.c
     src/ui/markdown.c
@@ -309,15 +309,15 @@ set(ALL_TEST_SOURCES
     src/inference/tokenizer/selector.c
     src/inference/tokenizer/simd.c
     src/inference/tokenizer/unicode_tables.c
-    src/inference/linalg/gemm/gemm.c
-    src/inference/linalg/gemm/gemm_neon.c
-    src/inference/linalg/gemm/gemm_amx.c
-    src/inference/linalg/norm/layernorm.c
-    src/inference/linalg/norm/layernorm_neon.c
-    src/inference/linalg/activation/activation.c
-    src/inference/linalg/activation/activation_neon.c
-    src/inference/linalg/rope/rope.c
-    src/inference/linalg/rope/rope_neon.c
+    src/inference/kernels/gemm/gemm.c
+    src/inference/kernels/gemm/gemm_neon.c
+    src/inference/kernels/gemm/gemm_amx.c
+    src/inference/kernels/norm/layernorm.c
+    src/inference/kernels/norm/layernorm_neon.c
+    src/inference/kernels/activation/activation.c
+    src/inference/kernels/activation/activation_neon.c
+    src/inference/kernels/rope/rope.c
+    src/inference/kernels/rope/rope_neon.c
     src/ui/modal.c
     src/ui/ui.c
     src/ui/markdown.c
@@ -387,7 +387,7 @@ target_compile_options(load_model PRIVATE
     -Wno-error
 )
 
-add_executable(bench_gemm bench/bench_gemm.c src/inference/linalg/gemm/gemm.c src/inference/linalg/gemm/gemm_neon.c src/inference/linalg/gemm/gemm_amx.c)
+add_executable(bench_gemm bench/bench_gemm.c src/inference/kernels/gemm/gemm.c src/inference/kernels/gemm/gemm_neon.c src/inference/kernels/gemm/gemm_amx.c)
 target_include_directories(bench_gemm PRIVATE src)
 target_compile_options(bench_gemm PRIVATE -O3 -ffast-math)
 target_link_libraries(bench_gemm PRIVATE Threads::Threads)
@@ -395,7 +395,7 @@ if(APPLE)
     target_link_libraries(bench_gemm PRIVATE "-framework Accelerate")
 endif()
 
-add_executable(bench_layernorm bench/bench_layernorm.c src/inference/linalg/norm/layernorm.c src/inference/linalg/norm/layernorm_neon.c src/inference/linalg/gemm/gemm.c src/inference/linalg/gemm/gemm_neon.c src/inference/linalg/gemm/gemm_amx.c)
+add_executable(bench_layernorm bench/bench_layernorm.c src/inference/kernels/norm/layernorm.c src/inference/kernels/norm/layernorm_neon.c src/inference/kernels/gemm/gemm.c src/inference/kernels/gemm/gemm_neon.c src/inference/kernels/gemm/gemm_amx.c)
 target_include_directories(bench_layernorm PRIVATE src)
 target_compile_options(bench_layernorm PRIVATE -O3 -ffast-math)
 target_link_libraries(bench_layernorm PRIVATE Threads::Threads)
@@ -403,7 +403,7 @@ if(APPLE)
     target_link_libraries(bench_layernorm PRIVATE "-framework Accelerate")
 endif()
 
-add_executable(profile_gemm bench/profile_gemm.c src/inference/linalg/gemm/gemm.c src/inference/linalg/gemm/gemm_neon.c src/inference/linalg/gemm/gemm_amx.c)
+add_executable(profile_gemm bench/profile_gemm.c src/inference/kernels/gemm/gemm.c src/inference/kernels/gemm/gemm_neon.c src/inference/kernels/gemm/gemm_amx.c)
 target_include_directories(profile_gemm PRIVATE src)
 target_compile_options(profile_gemm PRIVATE -O3 -ffast-math -g)
 target_link_libraries(profile_gemm PRIVATE Threads::Threads)
@@ -411,7 +411,7 @@ if(APPLE)
     target_link_libraries(profile_gemm PRIVATE "-framework Accelerate")
 endif()
 
-add_executable(profile_detailed bench/profile_detailed.c src/inference/linalg/gemm/gemm.c src/inference/linalg/gemm/gemm_neon.c src/inference/linalg/gemm/gemm_amx.c)
+add_executable(profile_detailed bench/profile_detailed.c src/inference/kernels/gemm/gemm.c src/inference/kernels/gemm/gemm_neon.c src/inference/kernels/gemm/gemm_amx.c)
 target_include_directories(profile_detailed PRIVATE src)
 target_compile_options(profile_detailed PRIVATE -O3 -ffast-math -g)
 target_link_libraries(profile_detailed PRIVATE Threads::Threads)
@@ -419,11 +419,11 @@ if(APPLE)
     target_link_libraries(profile_detailed PRIVATE "-framework Accelerate")
 endif()
 
-add_executable(bench_activation bench/bench_activation.c src/inference/linalg/activation/activation.c src/inference/linalg/activation/activation_neon.c)
+add_executable(bench_activation bench/bench_activation.c src/inference/kernels/activation/activation.c src/inference/kernels/activation/activation_neon.c)
 target_include_directories(bench_activation PRIVATE src)
 target_compile_options(bench_activation PRIVATE -O3 -ffast-math)
 
-add_executable(bench_rope bench/bench_rope.c src/inference/linalg/rope/rope.c src/inference/linalg/rope/rope_neon.c)
+add_executable(bench_rope bench/bench_rope.c src/inference/kernels/rope/rope.c src/inference/kernels/rope/rope_neon.c)
 target_include_directories(bench_rope PRIVATE src)
 target_compile_options(bench_rope PRIVATE -O3 -ffast-math)
 target_link_libraries(bench_activation PRIVATE Threads::Threads m)

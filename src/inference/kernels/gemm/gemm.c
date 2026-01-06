@@ -1,5 +1,5 @@
-#include "inference/linalg/gemm/gemm.h"
-#include "inference/linalg/gemm/gemm_kernels.h"
+#include "inference/kernels/gemm/gemm.h"
+#include "inference/kernels/gemm/gemm_kernels.h"
 #include <stdint.h>
 #include <string.h>
 

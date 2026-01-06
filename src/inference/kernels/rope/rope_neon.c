@@ -2,7 +2,7 @@
  * Rotary Position Embeddings - NEON Optimized Implementations
  */
 
-#include "inference/linalg/rope/rope_kernels.h"
+#include "inference/kernels/rope/rope_kernels.h"
 #include <string.h>
 
 #if defined(__ARM_NEON) || defined(__ARM_NEON__)

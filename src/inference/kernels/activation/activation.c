@@ -2,8 +2,8 @@
  * Activation Functions - Reference/Scalar Implementations
  */
 
-#include "inference/linalg/activation/activation.h"
-#include "inference/linalg/activation/activation_kernels.h"
+#include "inference/kernels/activation/activation.h"
+#include "inference/kernels/activation/activation_kernels.h"
 #include <math.h>
 #include <string.h>
 

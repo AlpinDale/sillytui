@@ -3,7 +3,7 @@
  */
 
 extern "C" {
-#include "inference/linalg/activation/activation.h"
+#include "inference/kernels/activation/activation.h"
 #include "test_framework.h"
 }
 

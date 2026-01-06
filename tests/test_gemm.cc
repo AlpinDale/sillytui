@@ -5,8 +5,8 @@
 #include "inference/model_loader/safetensors.hh"
 
 extern "C" {
-#include "inference/linalg/gemm/gemm.h"
-#include "inference/linalg/gemm/gemm_kernels.h"
+#include "inference/kernels/gemm/gemm.h"
+#include "inference/kernels/gemm/gemm_kernels.h"
 }
 
 static void naive_matmul_f32(const float *A, const float *B, float *C, int M,

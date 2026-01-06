@@ -11,8 +11,8 @@
 #include <string>
 
 extern "C" {
-#include "inference/linalg/gemm/gemm.h"
-#include "inference/linalg/norm/layernorm.h"
+#include "inference/kernels/gemm/gemm.h"
+#include "inference/kernels/norm/layernorm.h"
 }
 
 static safetensors::safetensors_t g_reference_data;

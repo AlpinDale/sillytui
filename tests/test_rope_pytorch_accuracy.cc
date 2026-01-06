@@ -3,7 +3,7 @@
  */
 
 extern "C" {
-#include "inference/linalg/rope/rope.h"
+#include "inference/kernels/rope/rope.h"
 #include "test_framework.h"
 }
 

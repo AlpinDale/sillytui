@@ -11,7 +11,7 @@
 #include <string>
 
 extern "C" {
-#include "inference/linalg/activation/activation.h"
+#include "inference/kernels/activation/activation.h"
 }
 
 static safetensors::safetensors_t g_reference_data;
