@@ -22,6 +22,8 @@ extern void run_activation_tests(void);
 extern void run_activation_pytorch_tests(void);
 extern void run_rope_tests(void);
 extern void run_rope_pytorch_tests(void);
+extern void run_softmax_tests(void);
+extern void run_softmax_pytorch_tests(void);
 
 int main(int argc, char **argv) {
   (void)argc;
@@ -52,6 +54,8 @@ int main(int argc, char **argv) {
   run_activation_pytorch_tests();
   run_rope_tests();
   run_rope_pytorch_tests();
+  run_softmax_tests();
+  run_softmax_pytorch_tests();
 
   print_test_summary();
 

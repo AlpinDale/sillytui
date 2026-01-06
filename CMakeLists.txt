@@ -98,6 +98,8 @@ set(SOURCES
     src/inference/kernels/activation/activation_neon.c
     src/inference/kernels/rope/rope.c
     src/inference/kernels/rope/rope_neon.c
+    src/inference/kernels/softmax/softmax.c
+    src/inference/kernels/softmax/softmax_neon.c
 )
 
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "arm64|aarch64")
@@ -139,6 +141,8 @@ set(TEST_SOURCES
     tests/test_activation_pytorch_accuracy.cc
     tests/test_rope.cc
     tests/test_rope_pytorch_accuracy.cc
+    tests/test_softmax.cc
+    tests/test_softmax_pytorch_accuracy.cc
     src/core/config.c
     src/core/macros.c
     src/core/time.c
@@ -167,6 +171,8 @@ set(TEST_SOURCES
     src/inference/kernels/activation/activation_neon.c
     src/inference/kernels/rope/rope.c
     src/inference/kernels/rope/rope_neon.c
+    src/inference/kernels/softmax/softmax.c
+    src/inference/kernels/softmax/softmax_neon.c
     src/ui/modal.c
     src/ui/ui.c
     src/ui/markdown.c
@@ -275,6 +281,8 @@ set(ALL_TEST_SOURCES
     tests/test_activation_pytorch_accuracy.cc
     tests/test_rope.cc
     tests/test_rope_pytorch_accuracy.cc
+    tests/test_softmax.cc
+    tests/test_softmax_pytorch_accuracy.cc
     tests/boundary/test_boundary.c
     tests/stress/test_stress.c
     tests/generated/test_unicode_gen.c
@@ -318,6 +326,8 @@ set(ALL_TEST_SOURCES
     src/inference/kernels/activation/activation_neon.c
     src/inference/kernels/rope/rope.c
     src/inference/kernels/rope/rope_neon.c
+    src/inference/kernels/softmax/softmax.c
+    src/inference/kernels/softmax/softmax_neon.c
     src/ui/modal.c
     src/ui/ui.c
     src/ui/markdown.c
@@ -426,4 +436,11 @@ target_compile_options(bench_activation PRIVATE -O3 -ffast-math)
 add_executable(bench_rope bench/bench_rope.c src/inference/kernels/rope/rope.c src/inference/kernels/rope/rope_neon.c)
 target_include_directories(bench_rope PRIVATE src)
 target_compile_options(bench_rope PRIVATE -O3 -ffast-math)
+
+add_executable(bench_softmax bench/bench_softmax.c src/inference/kernels/softmax/softmax.c src/inference/kernels/softmax/softmax_neon.c)
+target_include_directories(bench_softmax PRIVATE src)
+target_compile_options(bench_softmax PRIVATE -O3 -ffast-math)
+if(APPLE)
+  target_link_libraries(bench_softmax PRIVATE "-framework Accelerate")
+endif()
 target_link_libraries(bench_activation PRIVATE Threads::Threads m)
