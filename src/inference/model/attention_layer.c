@@ -1,29 +1,11 @@
 #include "inference/model/attention_layer.h"
-#include "inference/kernels/attention/attention.h"
 #include "inference/kernels/gemm/gemm.h"
 #include "inference/kernels/kv_cache/kv_cache.h"
 #include "inference/kernels/norm/layernorm.h"
 #include "inference/kernels/rope/rope.h"
 #include <math.h>
-#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <time.h>
-
-// #region agent log
-static void debug_log(const char *location, const char *message,
-                      const char *hypothesis_id, const char *data_json) {
-  FILE *f = fopen("/Users/alpindale/repos/cursed-silly/.cursor/debug.log", "a");
-  if (f) {
-    fprintf(f,
-            "{\"sessionId\":\"debug-session\",\"runId\":\"run1\","
-            "\"hypothesisId\":\"%s\",\"location\":\"%s\",\"message\":\"%s\","
-            "\"data\":%s,\"timestamp\":%ld}\n",
-            hypothesis_id, location, message, data_json, (long)time(NULL));
-    fclose(f);
-  }
-}
-// #endregion
 
 void qwen3_attention_layer_f32(
     float *output, const float *input, const float *q_proj, const float *k_proj,
@@ -54,20 +36,6 @@ void qwen3_attention_layer_f32(
   gemm_f32(input, k_proj, k, seq_len, kv_dim, hidden_size, false, true);
   gemm_f32(input, v_proj, v, seq_len, kv_dim, hidden_size, false, true);
 
-  // #region agent log
-  if (seq_len == 1 && cache_len == 0) {
-    char pre_norm_buf[256];
-    snprintf(pre_norm_buf, sizeof(pre_norm_buf),
-             "{\"q_before_norm_first3\":[%.6f,%.6f,%.6f],\"k_before_norm_"
-             "first3\":[%.6f,%.6f,%.6f],\"q_norm_first3\":[%.6f,%.6f,%.6f],\"k_"
-             "norm_first3\":[%.6f,%.6f,%.6f]}",
-             q[0], q[1], q[2], k[0], k[1], k[2], q_norm[0], q_norm[1],
-             q_norm[2], k_norm[0], k_norm[1], k_norm[2]);
-    debug_log("attention_layer.c:51", "Before Q/K normalization", "E",
-              pre_norm_buf);
-  }
-  // #endregion
-
   for (int i = 0; i < seq_len; i++) {
     for (int h = 0; h < num_heads; h++) {
       float *q_head = q + i * q_dim + h * head_dim;
@@ -82,46 +50,11 @@ void qwen3_attention_layer_f32(
     }
   }
 
-  // #region agent log
-  if (seq_len == 1 && cache_len == 0) {
-    char post_norm_buf[256];
-    snprintf(post_norm_buf, sizeof(post_norm_buf),
-             "{\"q_after_norm_first3\":[%.6f,%.6f,%.6f],\"k_after_norm_"
-             "first3\":[%.6f,%.6f,%.6f]}",
-             q[0], q[1], q[2], k[0], k[1], k[2]);
-    debug_log("attention_layer.c:65", "After Q/K normalization", "E",
-              post_norm_buf);
-  }
-  // #endregion
-
   rope_f32(position_ids, q, k, cos_sin_cache, seq_len, num_heads, num_kv_heads,
            head_dim, head_dim, true);
 
-  // #region agent log
-  if (seq_len == 1 && cache_len == 0) {
-    char rope_buf[256];
-    snprintf(rope_buf, sizeof(rope_buf),
-             "{\"pos_id\":%ld,\"q_after_rope_first3\":[%.6f,%.6f,%.6f],\"k_"
-             "after_rope_first3\":[%.6f,%.6f,%.6f]}",
-             (long)position_ids[0], q[0], q[1], q[2], k[0], k[1], k[2]);
-    debug_log("attention_layer.c:53", "After RoPE", "D", rope_buf);
-  }
-  // #endregion
-
   kv_cache_append_f32(key_cache, value_cache, k, v, cache_len, seq_len,
                       num_kv_heads, head_dim);
-
-  // #region agent log
-  if (seq_len == 1 && cache_len == 0) {
-    char cache_buf[256];
-    snprintf(cache_buf, sizeof(cache_buf),
-             "{\"cache_len\":%d,\"total_seq_len\":%d,\"key_cache_first3\":[%."
-             "6f,%.6f,%.6f],\"value_cache_first3\":[%.6f,%.6f,%.6f]}",
-             cache_len, cache_len + seq_len, key_cache[0], key_cache[1],
-             key_cache[2], value_cache[0], value_cache[1], value_cache[2]);
-    debug_log("attention_layer.c:56", "After KV cache append", "C", cache_buf);
-  }
-  // #endregion
 
   int total_seq_len = cache_len + seq_len;
   float scale = 1.0f / sqrtf((float)head_dim);
@@ -160,20 +93,6 @@ void qwen3_attention_layer_f32(
         }
         score *= scale;
 
-        // #region agent log
-        if (i == 0 && h == 0 && pos == 0 && seq_len == 1 && cache_len == 0) {
-          char score_buf[256];
-          snprintf(score_buf, sizeof(score_buf),
-                   "{\"query_pos\":%ld,\"kv_pos\":%d,\"score\":%.6f,\"scale\":%"
-                   ".6f,\"q_head_first3\":[%.6f,%.6f,%.6f],\"k_pos_first3\":[%."
-                   "6f,%.6f,%.6f]}",
-                   (long)query_abs_pos, pos, score, scale, q_head[0], q_head[1],
-                   q_head[2], k_pos[0], k_pos[1], k_pos[2]);
-          debug_log("attention_layer.c:87", "Attention score computed", "B",
-                    score_buf);
-        }
-        // #endregion
-
         float M_new = (score > M) ? score : M;
         float alpha = expf(M - M_new);
 
@@ -189,50 +108,10 @@ void qwen3_attention_layer_f32(
           out_head[d] /= sum;
         }
       }
-
-      // #region agent log
-      if (i == 0 && h == 0 && seq_len == 1 && cache_len == 0) {
-        char attn_buf[256];
-        snprintf(attn_buf, sizeof(attn_buf),
-                 "{\"out_head_sum\":%.6f,\"out_head_first3\":[%.6f,%.6f,%.6f],"
-                 "\"sum\":%.6f,\"M\":%.6f}",
-                 out_head[0] + out_head[1] + out_head[2], out_head[0],
-                 out_head[1], out_head[2], sum, M);
-        debug_log("attention_layer.c:107", "After attention computation", "B",
-                  attn_buf);
-      }
-      // #endregion
     }
   }
-
-  // #region agent log
-  if (seq_len == 1 && cache_len == 0) {
-    float manual_o0 = 0.0f;
-    for (int j = 0; j < q_dim; j++) {
-      manual_o0 += attn_out[j] * o_proj[j];
-    }
-    char pre_o_proj_buf[256];
-    snprintf(pre_o_proj_buf, sizeof(pre_o_proj_buf),
-             "{\"attn_out_first3\":[%.6f,%.6f,%.6f],\"o_proj_first3\":[%.6f,%."
-             "6f,%.6f],\"manual_o0\":%.6f}",
-             attn_out[0], attn_out[1], attn_out[2], o_proj[0], o_proj[1],
-             o_proj[2], manual_o0);
-    debug_log("attention_layer.c:180", "Before output projection", "H",
-              pre_o_proj_buf);
-  }
-  // #endregion
 
   gemm_f32(attn_out, o_proj, output, seq_len, hidden_size, q_dim, false, true);
-
-  // #region agent log
-  if (seq_len == 1 && cache_len == 0) {
-    char out_buf[256];
-    snprintf(out_buf, sizeof(out_buf),
-             "{\"output_first3\":[%.6f,%.6f,%.6f],\"actual_o0\":%.6f}",
-             output[0], output[1], output[2], output[0]);
-    debug_log("attention_layer.c:193", "After output projection", "H", out_buf);
-  }
-  // #endregion
 
   free(q);
   free(k);
