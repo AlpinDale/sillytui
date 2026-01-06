@@ -63,5 +63,4 @@ compile_commands.json
 # Benchmark scripts and binaries
 bench/
 
-# PyTorch accuracy test reference data - generator script only (data committed)
-tests/generate_gemm_reference_safetensors.py
+tests/*.py
