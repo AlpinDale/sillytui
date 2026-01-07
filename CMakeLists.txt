@@ -91,6 +91,7 @@ set(SOURCES
     src/inference/tokenizer/unicode_tables.c
     src/inference/kernels/gemm/gemm.c
     src/inference/kernels/gemm/gemm_neon.c
+    src/inference/kernels/gemm/gemm_amx.c
     src/inference/kernels/norm/layernorm.c
     src/inference/kernels/norm/layernorm_neon.c
     src/inference/kernels/activation/activation.c
