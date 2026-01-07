@@ -11,6 +11,7 @@ Still in development.
 ### Requirements
 - ncurses
 - curl
+- pthread
 - GCC 13+ or Clang 16+ (for C++23 support)
 
 ### Installation & Usage

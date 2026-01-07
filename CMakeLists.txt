@@ -91,7 +91,6 @@ set(SOURCES
     src/inference/tokenizer/unicode_tables.c
     src/inference/kernels/gemm/gemm.c
     src/inference/kernels/gemm/gemm_neon.c
-    src/inference/kernels/gemm/gemm_amx.c
     src/inference/kernels/norm/layernorm.c
     src/inference/kernels/norm/layernorm_neon.c
     src/inference/kernels/activation/activation.c
@@ -120,6 +119,7 @@ set(SOURCES
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "arm64|aarch64")
     enable_language(ASM)
     list(APPEND SOURCES src/inference/tokenizer/simd_arm64.S)
+    list(APPEND SOURCES src/inference/kernels/gemm/gemm_amx.c)
 elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
     enable_language(ASM)
     list(APPEND SOURCES src/inference/tokenizer/simd_x86_64.S)
@@ -186,7 +186,6 @@ set(TEST_SOURCES
     src/inference/tokenizer/sentencepiece.c
     src/inference/kernels/gemm/gemm.c
     src/inference/kernels/gemm/gemm_neon.c
-    src/inference/kernels/gemm/gemm_amx.c
     src/inference/kernels/norm/layernorm.c
     src/inference/kernels/norm/layernorm_neon.c
     src/inference/kernels/activation/activation.c
@@ -218,6 +217,7 @@ set(TEST_SOURCES
 
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "arm64|aarch64")
     list(APPEND TEST_SOURCES src/inference/tokenizer/simd_arm64.S)
+    list(APPEND TEST_SOURCES src/inference/kernels/gemm/gemm_amx.c)
 elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
     list(APPEND TEST_SOURCES src/inference/tokenizer/simd_x86_64.S)
 endif()
@@ -356,7 +356,6 @@ set(ALL_TEST_SOURCES
     src/inference/tokenizer/unicode_tables.c
     src/inference/kernels/gemm/gemm.c
     src/inference/kernels/gemm/gemm_neon.c
-    src/inference/kernels/gemm/gemm_amx.c
     src/inference/kernels/norm/layernorm.c
     src/inference/kernels/norm/layernorm_neon.c
     src/inference/kernels/activation/activation.c
@@ -383,6 +382,7 @@ set(ALL_TEST_SOURCES
 
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "arm64|aarch64")
     list(APPEND ALL_TEST_SOURCES src/inference/tokenizer/simd_arm64.S)
+    list(APPEND ALL_TEST_SOURCES src/inference/kernels/gemm/gemm_amx.c)
 elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
     list(APPEND ALL_TEST_SOURCES src/inference/tokenizer/simd_x86_64.S)
 endif()
@@ -456,7 +456,6 @@ add_executable(qwen3_inference
     src/inference/tokenizer/unicode_tables.c
     src/inference/kernels/gemm/gemm.c
     src/inference/kernels/gemm/gemm_neon.c
-    src/inference/kernels/gemm/gemm_amx.c
     src/inference/kernels/norm/layernorm.c
     src/inference/kernels/norm/layernorm_neon.c
     src/inference/kernels/activation/activation.c
@@ -472,6 +471,9 @@ add_executable(qwen3_inference
     src/inference/kernels/sampling/sampling.c
     src/inference/kernels/sampling/sampling_neon.c
 )
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "arm64|aarch64")
+    target_sources(qwen3_inference PRIVATE src/inference/kernels/gemm/gemm_amx.c)
+endif()
 set_source_files_properties(src/inference/model/qwen3/weights.c PROPERTIES
     COMPILE_FLAGS "-x c++ -std=c++11"
     LANGUAGE CXX
@@ -496,7 +498,10 @@ elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
 endif()
 
 if(EXISTS "${CMAKE_SOURCE_DIR}/bench/bench_gemm.c")
-  add_executable(bench_gemm bench/bench_gemm.c src/inference/kernels/gemm/gemm.c src/inference/kernels/gemm/gemm_neon.c src/inference/kernels/gemm/gemm_amx.c)
+  add_executable(bench_gemm bench/bench_gemm.c src/inference/kernels/gemm/gemm.c src/inference/kernels/gemm/gemm_neon.c)
+  if(CMAKE_SYSTEM_PROCESSOR MATCHES "arm64|aarch64")
+    target_sources(bench_gemm PRIVATE src/inference/kernels/gemm/gemm_amx.c)
+  endif()
   target_include_directories(bench_gemm PRIVATE src)
   target_compile_options(bench_gemm PRIVATE -O3 -ffast-math)
   target_link_libraries(bench_gemm PRIVATE Threads::Threads)
@@ -506,7 +511,10 @@ if(EXISTS "${CMAKE_SOURCE_DIR}/bench/bench_gemm.c")
 endif()
 
 if(EXISTS "${CMAKE_SOURCE_DIR}/bench/bench_layernorm.c")
-  add_executable(bench_layernorm bench/bench_layernorm.c src/inference/kernels/norm/layernorm.c src/inference/kernels/norm/layernorm_neon.c src/inference/kernels/gemm/gemm.c src/inference/kernels/gemm/gemm_neon.c src/inference/kernels/gemm/gemm_amx.c)
+  add_executable(bench_layernorm bench/bench_layernorm.c src/inference/kernels/norm/layernorm.c src/inference/kernels/norm/layernorm_neon.c src/inference/kernels/gemm/gemm.c src/inference/kernels/gemm/gemm_neon.c)
+  if(CMAKE_SYSTEM_PROCESSOR MATCHES "arm64|aarch64")
+    target_sources(bench_layernorm PRIVATE src/inference/kernels/gemm/gemm_amx.c)
+  endif()
   target_include_directories(bench_layernorm PRIVATE src)
   target_compile_options(bench_layernorm PRIVATE -O3 -ffast-math)
   target_link_libraries(bench_layernorm PRIVATE Threads::Threads)
@@ -516,7 +524,10 @@ if(EXISTS "${CMAKE_SOURCE_DIR}/bench/bench_layernorm.c")
 endif()
 
 if(EXISTS "${CMAKE_SOURCE_DIR}/bench/profile_gemm.c")
-  add_executable(profile_gemm bench/profile_gemm.c src/inference/kernels/gemm/gemm.c src/inference/kernels/gemm/gemm_neon.c src/inference/kernels/gemm/gemm_amx.c)
+  add_executable(profile_gemm bench/profile_gemm.c src/inference/kernels/gemm/gemm.c src/inference/kernels/gemm/gemm_neon.c)
+  if(CMAKE_SYSTEM_PROCESSOR MATCHES "arm64|aarch64")
+    target_sources(profile_gemm PRIVATE src/inference/kernels/gemm/gemm_amx.c)
+  endif()
   target_include_directories(profile_gemm PRIVATE src)
   target_compile_options(profile_gemm PRIVATE -O3 -ffast-math -g)
   target_link_libraries(profile_gemm PRIVATE Threads::Threads)
@@ -526,7 +537,10 @@ if(EXISTS "${CMAKE_SOURCE_DIR}/bench/profile_gemm.c")
 endif()
 
 if(EXISTS "${CMAKE_SOURCE_DIR}/bench/profile_detailed.c")
-  add_executable(profile_detailed bench/profile_detailed.c src/inference/kernels/gemm/gemm.c src/inference/kernels/gemm/gemm_neon.c src/inference/kernels/gemm/gemm_amx.c)
+  add_executable(profile_detailed bench/profile_detailed.c src/inference/kernels/gemm/gemm.c src/inference/kernels/gemm/gemm_neon.c)
+  if(CMAKE_SYSTEM_PROCESSOR MATCHES "arm64|aarch64")
+    target_sources(profile_detailed PRIVATE src/inference/kernels/gemm/gemm_amx.c)
+  endif()
   target_include_directories(profile_detailed PRIVATE src)
   target_compile_options(profile_detailed PRIVATE -O3 -ffast-math -g)
   target_link_libraries(profile_detailed PRIVATE Threads::Threads)
