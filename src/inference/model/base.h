@@ -5,10 +5,16 @@
 #include <stddef.h>
 #include <stdint.h>
 
+typedef enum {
+  INFERENCE_DTYPE_F32 = 0,
+  INFERENCE_DTYPE_F16 = 1,
+} inference_dtype_t;
+
 typedef struct inference_model inference_model_t;
 
 typedef struct {
-  bool (*load)(inference_model_t *model, const char *model_dir);
+  bool (*load)(inference_model_t *model, const char *model_dir,
+               inference_dtype_t dtype);
   void (*free)(inference_model_t *model);
   void (*reset_cache)(inference_model_t *model);
   bool (*forward)(inference_model_t *model, float *logits, const int *token_ids,
@@ -21,10 +27,11 @@ typedef struct {
 struct inference_model {
   const inference_model_ops_t *ops;
   void *impl;
+  inference_dtype_t dtype;
 };
 
 bool inference_model_load(inference_model_t *model, const char *model_type,
-                          const char *model_dir);
+                          const char *model_dir, inference_dtype_t dtype);
 void inference_model_free(inference_model_t *model);
 void inference_model_reset_cache(inference_model_t *model);
 bool inference_model_forward(inference_model_t *model, float *logits,

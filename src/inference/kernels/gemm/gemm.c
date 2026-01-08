@@ -1,6 +1,7 @@
 #include "inference/kernels/gemm/gemm.h"
 #include "inference/kernels/gemm/gemm_kernels.h"
 #include <stdint.h>
+#include <stdlib.h>
 #include <string.h>
 
 #ifdef _WIN32
@@ -12,6 +13,10 @@
 #if defined(__APPLE__)
 #include <Accelerate/Accelerate.h>
 #define HAS_ACCELERATE 1
+#endif
+
+#if defined(__ARM_NEON) || defined(__ARM_NEON__)
+#include <arm_neon.h>
 #endif
 
 static int g_num_threads = 0;
@@ -129,13 +134,38 @@ void f32_array_to_bf16(const float *src, uint16_t *dst, size_t count) {
 }
 
 void f16_array_to_f32(const uint16_t *src, float *dst, size_t count) {
+#if defined(__ARM_NEON) || defined(__ARM_NEON__)
+  size_t i = 0;
+  for (; i + 8 <= count; i += 8) {
+    float16x8_t f16 = vld1q_f16((const float16_t *)&src[i]);
+    float32x4_t lo = vcvt_f32_f16(vget_low_f16(f16));
+    float32x4_t hi = vcvt_f32_f16(vget_high_f16(f16));
+    vst1q_f32(&dst[i], lo);
+    vst1q_f32(&dst[i + 4], hi);
+  }
+  for (; i < count; i++)
+    dst[i] = fp16_to_float_c(src[i]);
+#else
   for (size_t i = 0; i < count; i++)
     dst[i] = fp16_to_float_c(src[i]);
+#endif
 }
 
 void f32_array_to_f16(const float *src, uint16_t *dst, size_t count) {
+#if defined(__ARM_NEON) || defined(__ARM_NEON__)
+  size_t i = 0;
+  for (; i + 8 <= count; i += 8) {
+    float32x4_t lo = vld1q_f32(&src[i]);
+    float32x4_t hi = vld1q_f32(&src[i + 4]);
+    float16x8_t f16 = vcombine_f16(vcvt_f16_f32(lo), vcvt_f16_f32(hi));
+    vst1q_f16((float16_t *)&dst[i], f16);
+  }
+  for (; i < count; i++)
+    dst[i] = float_to_fp16_c(src[i]);
+#else
   for (size_t i = 0; i < count; i++)
     dst[i] = float_to_fp16_c(src[i]);
+#endif
 }
 
 static void gemm_f32_naive(const float *A, const float *B, float *C, int M,
@@ -274,18 +304,95 @@ void gemm_f16(const uint16_t *A, const uint16_t *B, uint16_t *C, int M, int N,
     return;
 
   gemm_caps_t caps = gemm_get_capabilities();
-  if (caps.has_amx) {
+
+  if (caps.has_amx && M >= 32 && N >= 32) {
     int nt = gemm_get_num_threads();
     long long flops = (long long)M * N * K * 2;
-    if (M >= 32 && N >= 32) {
-      if (nt > 1 && M >= 64 && flops >= MT_THRESHOLD_FLOPS) {
-        gemm_f16_kernel_amx_mt(A, B, C, M, N, K, nt);
-      } else {
-        gemm_f16_kernel_amx(A, B, C, M, N, K);
-      }
+    if (nt > 1 && M >= 64 && flops >= MT_THRESHOLD_FLOPS) {
+      gemm_f16_kernel_amx_mt(A, B, C, M, N, K, nt);
+    } else {
+      gemm_f16_kernel_amx(A, B, C, M, N, K);
+    }
+    return;
+  }
+
+#ifdef HAS_ACCELERATE
+  {
+    BNNSNDArrayDescriptor descA = {
+        .flags = BNNSNDArrayFlagBackpropSet,
+        .layout = BNNSDataLayoutRowMajorMatrix,
+        .size = {(size_t)K, (size_t)M, 0, 0, 0, 0, 0, 0},
+        .stride = {1, (size_t)K, 0, 0, 0, 0, 0, 0},
+        .data = (void *)A,
+        .data_type = BNNSDataTypeFloat16,
+        .table_data = NULL,
+        .table_data_type = BNNSDataTypeFloat16,
+        .data_scale = 1.0f,
+        .data_bias = 0.0f,
+    };
+    BNNSNDArrayDescriptor descB = {
+        .flags = BNNSNDArrayFlagBackpropSet,
+        .layout = BNNSDataLayoutRowMajorMatrix,
+        .size = {(size_t)N, (size_t)K, 0, 0, 0, 0, 0, 0},
+        .stride = {1, (size_t)N, 0, 0, 0, 0, 0, 0},
+        .data = (void *)B,
+        .data_type = BNNSDataTypeFloat16,
+        .table_data = NULL,
+        .table_data_type = BNNSDataTypeFloat16,
+        .data_scale = 1.0f,
+        .data_bias = 0.0f,
+    };
+    BNNSNDArrayDescriptor descC = {
+        .flags = BNNSNDArrayFlagBackpropSet,
+        .layout = BNNSDataLayoutRowMajorMatrix,
+        .size = {(size_t)N, (size_t)M, 0, 0, 0, 0, 0, 0},
+        .stride = {1, (size_t)N, 0, 0, 0, 0, 0, 0},
+        .data = (void *)C,
+        .data_type = BNNSDataTypeFloat16,
+        .table_data = NULL,
+        .table_data_type = BNNSDataTypeFloat16,
+        .data_scale = 1.0f,
+        .data_bias = 0.0f,
+    };
+
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+    int result =
+        BNNSMatMul(false, false, 1.0f, &descA, &descB, &descC, NULL, NULL);
+#pragma clang diagnostic pop
+    if (result == 0) {
       return;
     }
   }
+
+  long long total_elements =
+      (long long)M * K + (long long)K * N + (long long)M * N;
+  if (total_elements > 1024) {
+    float *A_f32 = (float *)malloc(M * K * sizeof(float));
+    float *B_f32 = (float *)malloc(K * N * sizeof(float));
+    float *C_f32 = (float *)malloc(M * N * sizeof(float));
+    if (A_f32 && B_f32 && C_f32) {
+      f16_array_to_f32(A, A_f32, M * K);
+      f16_array_to_f32(B, B_f32, K * N);
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+      cblas_sgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans, M, N, K, 1.0f,
+                  A_f32, K, B_f32, N, 0.0f, C_f32, N);
+#pragma clang diagnostic pop
+      f32_array_to_f16(C_f32, C, M * N);
+      free(A_f32);
+      free(B_f32);
+      free(C_f32);
+      return;
+    }
+    if (A_f32)
+      free(A_f32);
+    if (B_f32)
+      free(B_f32);
+    if (C_f32)
+      free(C_f32);
+  }
+#endif
 
   if (caps.has_neon) {
     int nt = gemm_get_num_threads();

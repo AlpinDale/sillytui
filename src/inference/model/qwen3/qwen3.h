@@ -10,19 +10,21 @@
 typedef struct {
   qwen3_config_t config;
   qwen3_weights_t weights;
+  qwen3_dtype_t dtype;
 
-  float **key_cache;
-  float **value_cache;
+  void **key_cache;
+  void **value_cache;
   int *cache_len;
   int max_seq_len;
 
-  float *cos_sin_cache;
+  void *cos_sin_cache;
 
-  float *temp_buffer;
+  void *temp_buffer;
   size_t temp_buffer_size;
 } qwen3_model_t;
 
-bool qwen3_model_load(qwen3_model_t *model, const char *model_dir);
+bool qwen3_model_load(qwen3_model_t *model, const char *model_dir,
+                      qwen3_dtype_t dtype);
 void qwen3_model_free(qwen3_model_t *model);
 void qwen3_model_reset_cache(qwen3_model_t *model);
 

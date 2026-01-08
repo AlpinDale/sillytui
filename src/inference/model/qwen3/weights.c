@@ -6,8 +6,73 @@
 #define SAFETENSORS_CPP_IMPLEMENTATION
 #include "inference/model_loader/safetensors.hh"
 
-static float *load_tensor_f32(const safetensors::safetensors_t *st,
-                              const char *tensor_name, size_t *out_size) {
+static inline uint16_t float_to_fp16(float x) {
+  uint32_t bits;
+  memcpy(&bits, &x, sizeof(float));
+  uint32_t sign = bits & 0x80000000;
+  uint32_t exp = (bits >> 23) & 0xFF;
+  uint32_t mant = bits & 0x7FFFFF;
+
+  if (exp == 0xFF) {
+    if (mant != 0)
+      return 0x7E00;
+    return (uint16_t)((sign >> 16) | 0x7C00);
+  }
+  if (exp == 0 && mant == 0)
+    return (uint16_t)(sign >> 16);
+
+  int32_t new_exp = (int32_t)exp - 127 + 15;
+  if (new_exp <= 0)
+    return (uint16_t)(sign >> 16);
+  if (new_exp >= 31)
+    return (uint16_t)((sign >> 16) | 0x7C00);
+
+  uint16_t fp16_exp = (uint16_t)(new_exp << 10);
+  uint16_t fp16_mant = (uint16_t)(mant >> 13);
+  return (uint16_t)((sign >> 16) | fp16_exp | fp16_mant);
+}
+
+static inline float fp16_to_float(uint16_t fp16) {
+  uint32_t sign = (fp16 & 0x8000) << 16;
+  uint32_t exp = (fp16 >> 10) & 0x1F;
+  uint32_t mant = fp16 & 0x3FF;
+  uint32_t f32_bits;
+  if (exp == 0) {
+    if (mant == 0) {
+      f32_bits = sign;
+    } else {
+      int e = -14;
+      while ((mant & 0x400) == 0) {
+        mant <<= 1;
+        e--;
+      }
+      mant &= 0x3FF;
+      f32_bits = sign | (((uint32_t)(e + 127)) << 23) | (mant << 13);
+    }
+  } else if (exp == 31) {
+    f32_bits = sign | 0x7F800000 | (mant << 13);
+  } else {
+    f32_bits = sign | (((uint32_t)(exp - 15 + 127)) << 23) | (mant << 13);
+  }
+  float result;
+  memcpy(&result, &f32_bits, sizeof(float));
+  return result;
+}
+
+static inline float bf16_to_float(uint16_t bf16) {
+  uint32_t bits = ((uint32_t)bf16) << 16;
+  float f;
+  memcpy(&f, &bits, sizeof(float));
+  return f;
+}
+
+static inline uint16_t bf16_to_fp16(uint16_t bf16) {
+  return float_to_fp16(bf16_to_float(bf16));
+}
+
+static uint16_t *load_tensor_f16(const safetensors::safetensors_t *st,
+                                 const char *tensor_name, size_t *out_size,
+                                 bool transpose, int rows, int cols) {
   const auto &keys = st->tensors.keys();
   for (size_t i = 0; i < keys.size(); i++) {
     if (keys[i] == tensor_name) {
@@ -15,23 +80,48 @@ static float *load_tensor_f32(const safetensors::safetensors_t *st,
       st->tensors.at(i, &tensor);
 
       size_t tensor_size = safetensors::get_shape_size(tensor);
-      float *data = (float *)malloc(tensor_size * sizeof(float));
+      uint16_t *data = (uint16_t *)malloc(tensor_size * sizeof(uint16_t));
       if (!data)
         return NULL;
 
       const uint8_t *src = st->databuffer_addr + tensor.data_offsets[0];
 
-      if (tensor.dtype == safetensors::dtype::kFLOAT32) {
-        memcpy(data, src, tensor_size * sizeof(float));
+      if (tensor.dtype == safetensors::dtype::kFLOAT16) {
+        if (transpose && rows > 0 && cols > 0) {
+          const uint16_t *src_f16 = (const uint16_t *)src;
+          for (int r = 0; r < rows; r++) {
+            for (int c = 0; c < cols; c++) {
+              data[c * rows + r] = src_f16[r * cols + c];
+            }
+          }
+        } else {
+          memcpy(data, src, tensor_size * sizeof(uint16_t));
+        }
       } else if (tensor.dtype == safetensors::dtype::kBFLOAT16) {
         const uint16_t *src_bf16 = (const uint16_t *)src;
-        for (size_t j = 0; j < tensor_size; j++) {
-          data[j] = safetensors::bfloat16_to_float(src_bf16[j]);
+        if (transpose && rows > 0 && cols > 0) {
+          for (int r = 0; r < rows; r++) {
+            for (int c = 0; c < cols; c++) {
+              data[c * rows + r] = bf16_to_fp16(src_bf16[r * cols + c]);
+            }
+          }
+        } else {
+          for (size_t j = 0; j < tensor_size; j++) {
+            data[j] = bf16_to_fp16(src_bf16[j]);
+          }
         }
-      } else if (tensor.dtype == safetensors::dtype::kFLOAT16) {
-        const uint16_t *src_f16 = (const uint16_t *)src;
-        for (size_t j = 0; j < tensor_size; j++) {
-          data[j] = safetensors::fp16_to_float(src_f16[j]);
+      } else if (tensor.dtype == safetensors::dtype::kFLOAT32) {
+        const float *src_f32 = (const float *)src;
+        if (transpose && rows > 0 && cols > 0) {
+          for (int r = 0; r < rows; r++) {
+            for (int c = 0; c < cols; c++) {
+              data[c * rows + r] = float_to_fp16(src_f32[r * cols + c]);
+            }
+          }
+        } else {
+          for (size_t j = 0; j < tensor_size; j++) {
+            data[j] = float_to_fp16(src_f32[j]);
+          }
         }
       } else {
         free(data);
@@ -46,76 +136,237 @@ static float *load_tensor_f32(const safetensors::safetensors_t *st,
   return NULL;
 }
 
-static bool load_layer_weights(qwen3_layer_weights_t *layer_weights,
-                               const safetensors::safetensors_t *st,
-                               int layer_idx, const qwen3_config_t *config) {
+static float *load_tensor_f32(const safetensors::safetensors_t *st,
+                              const char *tensor_name, size_t *out_size,
+                              bool transpose, int rows, int cols) {
+  const auto &keys = st->tensors.keys();
+  for (size_t i = 0; i < keys.size(); i++) {
+    if (keys[i] == tensor_name) {
+      safetensors::tensor_t tensor;
+      st->tensors.at(i, &tensor);
+
+      size_t tensor_size = safetensors::get_shape_size(tensor);
+      float *data = (float *)malloc(tensor_size * sizeof(float));
+      if (!data)
+        return NULL;
+
+      const uint8_t *src = st->databuffer_addr + tensor.data_offsets[0];
+
+      if (tensor.dtype == safetensors::dtype::kFLOAT32) {
+        const float *src_f32 = (const float *)src;
+        if (transpose && rows > 0 && cols > 0) {
+          for (int r = 0; r < rows; r++) {
+            for (int c = 0; c < cols; c++) {
+              data[c * rows + r] = src_f32[r * cols + c];
+            }
+          }
+        } else {
+          memcpy(data, src, tensor_size * sizeof(float));
+        }
+      } else if (tensor.dtype == safetensors::dtype::kFLOAT16) {
+        const uint16_t *src_f16 = (const uint16_t *)src;
+        if (transpose && rows > 0 && cols > 0) {
+          for (int r = 0; r < rows; r++) {
+            for (int c = 0; c < cols; c++) {
+              data[c * rows + r] = fp16_to_float(src_f16[r * cols + c]);
+            }
+          }
+        } else {
+          for (size_t j = 0; j < tensor_size; j++) {
+            data[j] = fp16_to_float(src_f16[j]);
+          }
+        }
+      } else if (tensor.dtype == safetensors::dtype::kBFLOAT16) {
+        const uint16_t *src_bf16 = (const uint16_t *)src;
+        if (transpose && rows > 0 && cols > 0) {
+          for (int r = 0; r < rows; r++) {
+            for (int c = 0; c < cols; c++) {
+              data[c * rows + r] = bf16_to_float(src_bf16[r * cols + c]);
+            }
+          }
+        } else {
+          for (size_t j = 0; j < tensor_size; j++) {
+            data[j] = bf16_to_float(src_bf16[j]);
+          }
+        }
+      } else {
+        free(data);
+        return NULL;
+      }
+
+      if (out_size)
+        *out_size = tensor_size;
+      return data;
+    }
+  }
+  return NULL;
+}
+
+static bool load_layer_weights_f16(qwen3_layer_weights_t *layer_weights,
+                                   const safetensors::safetensors_t *st,
+                                   int layer_idx,
+                                   const qwen3_config_t *config) {
+  char tensor_name[256];
+  size_t dummy;
+  int hidden = config->hidden_size;
+  int q_dim = config->num_attention_heads * config->head_dim;
+  int kv_dim = config->num_key_value_heads * config->head_dim;
+  int inter = config->intermediate_size;
+
+  snprintf(tensor_name, sizeof(tensor_name),
+           "model.layers.%d.self_attn.q_proj.weight", layer_idx);
+  layer_weights->q_proj =
+      load_tensor_f16(st, tensor_name, &dummy, true, q_dim, hidden);
+  if (!layer_weights->q_proj)
+    return false;
+
+  snprintf(tensor_name, sizeof(tensor_name),
+           "model.layers.%d.self_attn.k_proj.weight", layer_idx);
+  layer_weights->k_proj =
+      load_tensor_f16(st, tensor_name, &dummy, true, kv_dim, hidden);
+  if (!layer_weights->k_proj)
+    return false;
+
+  snprintf(tensor_name, sizeof(tensor_name),
+           "model.layers.%d.self_attn.v_proj.weight", layer_idx);
+  layer_weights->v_proj =
+      load_tensor_f16(st, tensor_name, &dummy, true, kv_dim, hidden);
+  if (!layer_weights->v_proj)
+    return false;
+
+  snprintf(tensor_name, sizeof(tensor_name),
+           "model.layers.%d.self_attn.o_proj.weight", layer_idx);
+  layer_weights->o_proj =
+      load_tensor_f16(st, tensor_name, &dummy, true, hidden, q_dim);
+  if (!layer_weights->o_proj)
+    return false;
+
+  snprintf(tensor_name, sizeof(tensor_name),
+           "model.layers.%d.self_attn.q_norm.weight", layer_idx);
+  layer_weights->q_norm = load_tensor_f16(st, tensor_name, &dummy, false, 0, 0);
+  if (!layer_weights->q_norm)
+    return false;
+
+  snprintf(tensor_name, sizeof(tensor_name),
+           "model.layers.%d.self_attn.k_norm.weight", layer_idx);
+  layer_weights->k_norm = load_tensor_f16(st, tensor_name, &dummy, false, 0, 0);
+  if (!layer_weights->k_norm)
+    return false;
+
+  snprintf(tensor_name, sizeof(tensor_name),
+           "model.layers.%d.mlp.gate_proj.weight", layer_idx);
+  layer_weights->gate_proj =
+      load_tensor_f16(st, tensor_name, &dummy, true, inter, hidden);
+  if (!layer_weights->gate_proj)
+    return false;
+
+  snprintf(tensor_name, sizeof(tensor_name),
+           "model.layers.%d.mlp.up_proj.weight", layer_idx);
+  layer_weights->up_proj =
+      load_tensor_f16(st, tensor_name, &dummy, true, inter, hidden);
+  if (!layer_weights->up_proj)
+    return false;
+
+  snprintf(tensor_name, sizeof(tensor_name),
+           "model.layers.%d.mlp.down_proj.weight", layer_idx);
+  layer_weights->down_proj =
+      load_tensor_f16(st, tensor_name, &dummy, true, hidden, inter);
+  if (!layer_weights->down_proj)
+    return false;
+
+  snprintf(tensor_name, sizeof(tensor_name),
+           "model.layers.%d.input_layernorm.weight", layer_idx);
+  layer_weights->attn_norm =
+      load_tensor_f16(st, tensor_name, &dummy, false, 0, 0);
+  if (!layer_weights->attn_norm)
+    return false;
+
+  snprintf(tensor_name, sizeof(tensor_name),
+           "model.layers.%d.post_attention_layernorm.weight", layer_idx);
+  layer_weights->ffn_norm =
+      load_tensor_f16(st, tensor_name, &dummy, false, 0, 0);
+  if (!layer_weights->ffn_norm)
+    return false;
+
+  return true;
+}
+
+static bool load_layer_weights_f32(qwen3_layer_weights_t *layer_weights,
+                                   const safetensors::safetensors_t *st,
+                                   int layer_idx,
+                                   const qwen3_config_t *config) {
   (void)config;
   char tensor_name[256];
   size_t dummy;
 
   snprintf(tensor_name, sizeof(tensor_name),
            "model.layers.%d.self_attn.q_proj.weight", layer_idx);
-  layer_weights->q_proj = load_tensor_f32(st, tensor_name, &dummy);
+  layer_weights->q_proj = load_tensor_f32(st, tensor_name, &dummy, false, 0, 0);
   if (!layer_weights->q_proj)
     return false;
 
   snprintf(tensor_name, sizeof(tensor_name),
            "model.layers.%d.self_attn.k_proj.weight", layer_idx);
-  layer_weights->k_proj = load_tensor_f32(st, tensor_name, &dummy);
+  layer_weights->k_proj = load_tensor_f32(st, tensor_name, &dummy, false, 0, 0);
   if (!layer_weights->k_proj)
     return false;
 
   snprintf(tensor_name, sizeof(tensor_name),
            "model.layers.%d.self_attn.v_proj.weight", layer_idx);
-  layer_weights->v_proj = load_tensor_f32(st, tensor_name, &dummy);
+  layer_weights->v_proj = load_tensor_f32(st, tensor_name, &dummy, false, 0, 0);
   if (!layer_weights->v_proj)
     return false;
 
   snprintf(tensor_name, sizeof(tensor_name),
            "model.layers.%d.self_attn.o_proj.weight", layer_idx);
-  layer_weights->o_proj = load_tensor_f32(st, tensor_name, &dummy);
+  layer_weights->o_proj = load_tensor_f32(st, tensor_name, &dummy, false, 0, 0);
   if (!layer_weights->o_proj)
     return false;
 
   snprintf(tensor_name, sizeof(tensor_name),
            "model.layers.%d.self_attn.q_norm.weight", layer_idx);
-  layer_weights->q_norm = load_tensor_f32(st, tensor_name, &dummy);
+  layer_weights->q_norm = load_tensor_f32(st, tensor_name, &dummy, false, 0, 0);
   if (!layer_weights->q_norm)
     return false;
 
   snprintf(tensor_name, sizeof(tensor_name),
            "model.layers.%d.self_attn.k_norm.weight", layer_idx);
-  layer_weights->k_norm = load_tensor_f32(st, tensor_name, &dummy);
+  layer_weights->k_norm = load_tensor_f32(st, tensor_name, &dummy, false, 0, 0);
   if (!layer_weights->k_norm)
     return false;
 
   snprintf(tensor_name, sizeof(tensor_name),
            "model.layers.%d.mlp.gate_proj.weight", layer_idx);
-  layer_weights->gate_proj = load_tensor_f32(st, tensor_name, &dummy);
+  layer_weights->gate_proj =
+      load_tensor_f32(st, tensor_name, &dummy, false, 0, 0);
   if (!layer_weights->gate_proj)
     return false;
 
   snprintf(tensor_name, sizeof(tensor_name),
            "model.layers.%d.mlp.up_proj.weight", layer_idx);
-  layer_weights->up_proj = load_tensor_f32(st, tensor_name, &dummy);
+  layer_weights->up_proj =
+      load_tensor_f32(st, tensor_name, &dummy, false, 0, 0);
   if (!layer_weights->up_proj)
     return false;
 
   snprintf(tensor_name, sizeof(tensor_name),
            "model.layers.%d.mlp.down_proj.weight", layer_idx);
-  layer_weights->down_proj = load_tensor_f32(st, tensor_name, &dummy);
+  layer_weights->down_proj =
+      load_tensor_f32(st, tensor_name, &dummy, false, 0, 0);
   if (!layer_weights->down_proj)
     return false;
 
   snprintf(tensor_name, sizeof(tensor_name),
            "model.layers.%d.input_layernorm.weight", layer_idx);
-  layer_weights->attn_norm = load_tensor_f32(st, tensor_name, &dummy);
+  layer_weights->attn_norm =
+      load_tensor_f32(st, tensor_name, &dummy, false, 0, 0);
   if (!layer_weights->attn_norm)
     return false;
 
   snprintf(tensor_name, sizeof(tensor_name),
            "model.layers.%d.post_attention_layernorm.weight", layer_idx);
-  layer_weights->ffn_norm = load_tensor_f32(st, tensor_name, &dummy);
+  layer_weights->ffn_norm =
+      load_tensor_f32(st, tensor_name, &dummy, false, 0, 0);
   if (!layer_weights->ffn_norm)
     return false;
 
@@ -123,11 +374,12 @@ static bool load_layer_weights(qwen3_layer_weights_t *layer_weights,
 }
 
 bool qwen3_weights_load(qwen3_weights_t *weights, const qwen3_config_t *config,
-                        const char *model_path) {
+                        const char *model_path, qwen3_dtype_t dtype) {
   if (!weights || !config || !model_path)
     return false;
 
   memset(weights, 0, sizeof(*weights));
+  weights->dtype = dtype;
 
   safetensors::safetensors_t st;
   std::string warn, err;
@@ -142,29 +394,63 @@ bool qwen3_weights_load(qwen3_weights_t *weights, const qwen3_config_t *config,
     return false;
   }
 
-  weights->embed_tokens =
-      load_tensor_f32(&st, "model.embed_tokens.weight", NULL);
-  if (!weights->embed_tokens) {
-    fprintf(stderr, "Failed to load embed_tokens\n");
-    return false;
-  }
+  int vocab = config->vocab_size;
+  int hidden = config->hidden_size;
 
-  weights->norm = load_tensor_f32(&st, "model.norm.weight", NULL);
-  if (!weights->norm) {
-    fprintf(stderr, "Failed to load norm\n");
-    return false;
-  }
-
-  const char *lm_head_name = config->tie_word_embeddings
-                                 ? "model.embed_tokens.weight"
-                                 : "lm_head.weight";
-  weights->lm_head = load_tensor_f32(&st, lm_head_name, NULL);
-  if (!weights->lm_head) {
-    if (config->tie_word_embeddings) {
-      weights->lm_head = weights->embed_tokens;
-    } else {
-      fprintf(stderr, "Failed to load lm_head\n");
+  if (dtype == QWEN3_DTYPE_F16) {
+    weights->embed_tokens =
+        load_tensor_f16(&st, "model.embed_tokens.weight", NULL, false, 0, 0);
+    if (!weights->embed_tokens) {
+      fprintf(stderr, "Failed to load embed_tokens\n");
       return false;
+    }
+
+    weights->norm =
+        load_tensor_f16(&st, "model.norm.weight", NULL, false, 0, 0);
+    if (!weights->norm) {
+      fprintf(stderr, "Failed to load norm\n");
+      return false;
+    }
+
+    const char *lm_head_name = config->tie_word_embeddings
+                                   ? "model.embed_tokens.weight"
+                                   : "lm_head.weight";
+    weights->lm_head =
+        load_tensor_f16(&st, lm_head_name, NULL, true, vocab, hidden);
+    if (!weights->lm_head) {
+      if (config->tie_word_embeddings) {
+        weights->lm_head = weights->embed_tokens;
+      } else {
+        fprintf(stderr, "Failed to load lm_head\n");
+        return false;
+      }
+    }
+  } else {
+    weights->embed_tokens =
+        load_tensor_f32(&st, "model.embed_tokens.weight", NULL, false, 0, 0);
+    if (!weights->embed_tokens) {
+      fprintf(stderr, "Failed to load embed_tokens\n");
+      return false;
+    }
+
+    weights->norm =
+        load_tensor_f32(&st, "model.norm.weight", NULL, false, 0, 0);
+    if (!weights->norm) {
+      fprintf(stderr, "Failed to load norm\n");
+      return false;
+    }
+
+    const char *lm_head_name = config->tie_word_embeddings
+                                   ? "model.embed_tokens.weight"
+                                   : "lm_head.weight";
+    weights->lm_head = load_tensor_f32(&st, lm_head_name, NULL, false, 0, 0);
+    if (!weights->lm_head) {
+      if (config->tie_word_embeddings) {
+        weights->lm_head = weights->embed_tokens;
+      } else {
+        fprintf(stderr, "Failed to load lm_head\n");
+        return false;
+      }
     }
   }
 
@@ -177,7 +463,13 @@ bool qwen3_weights_load(qwen3_weights_t *weights, const qwen3_config_t *config,
   }
 
   for (int i = 0; i < config->num_hidden_layers; i++) {
-    if (!load_layer_weights(&weights->layers[i], &st, i, config)) {
+    bool success;
+    if (dtype == QWEN3_DTYPE_F16) {
+      success = load_layer_weights_f16(&weights->layers[i], &st, i, config);
+    } else {
+      success = load_layer_weights_f32(&weights->layers[i], &st, i, config);
+    }
+    if (!success) {
       fprintf(stderr, "Failed to load layer %d weights\n", i);
       qwen3_weights_free(weights);
       return false;

@@ -25,31 +25,73 @@ static int estimate_model_size_mb(const qwen3_model_t *model) {
   return (vocab_embed + layers + lm_head) / (1024 * 1024);
 }
 
+static void print_usage(const char *prog) {
+  fprintf(stderr, "Usage: %s [options] <model_dir> [prompt]\n", prog);
+  fprintf(stderr, "Options:\n");
+  fprintf(stderr, "  --dtype <f32|f16>  Set compute dtype (default: f16)\n");
+  fprintf(stderr, "  --help             Show this help message\n");
+  fprintf(stderr, "\nIf no prompt is provided, uses BOS token only\n");
+}
+
 int main(int argc, char **argv) {
   if (argc < 2) {
-    fprintf(stderr, "Usage: %s <model_dir> [prompt]\n", argv[0]);
-    fprintf(stderr, "  If no prompt is provided, uses BOS token only\n");
+    print_usage(argv[0]);
     return 1;
   }
 
-  const char *model_dir = argv[1];
-  const char *prompt = argc > 2 ? argv[2] : NULL;
+  qwen3_dtype_t dtype = QWEN3_DTYPE_F16;
+  const char *model_dir = NULL;
+  const char *prompt = NULL;
+
+  for (int i = 1; i < argc; i++) {
+    if (strcmp(argv[i], "--dtype") == 0) {
+      if (i + 1 >= argc) {
+        fprintf(stderr, "Error: --dtype requires an argument\n");
+        return 1;
+      }
+      i++;
+      if (strcmp(argv[i], "f32") == 0) {
+        dtype = QWEN3_DTYPE_F32;
+      } else if (strcmp(argv[i], "f16") == 0) {
+        dtype = QWEN3_DTYPE_F16;
+      } else {
+        fprintf(stderr, "Error: Invalid dtype '%s'. Use 'f32' or 'f16'\n", argv[i]);
+        return 1;
+      }
+    } else if (strcmp(argv[i], "--help") == 0) {
+      print_usage(argv[0]);
+      return 0;
+    } else if (model_dir == NULL) {
+      model_dir = argv[i];
+    } else if (prompt == NULL) {
+      prompt = argv[i];
+    }
+  }
+
+  if (model_dir == NULL) {
+    fprintf(stderr, "Error: model_dir is required\n");
+    print_usage(argv[0]);
+    return 1;
+  }
+
   qwen3_model_t model;
 
   double load_start = get_time_ms();
-  if (!qwen3_model_load(&model, model_dir)) {
+  if (!qwen3_model_load(&model, model_dir, dtype)) {
     fprintf(stderr, "Failed to load model\n");
     return 1;
   }
   double load_time = get_time_ms() - load_start;
 
   int model_size_mb = estimate_model_size_mb(&model);
-  printf("Model: Qwen3-%.1fB (L%d, H%d, %dM params, ~%dMB) | Load: %.1fms\n",
+  const char *dtype_str = (dtype == QWEN3_DTYPE_F16) ? "f16" : "f32";
+  printf("Model: Qwen3-%.1fB (L%d, H%d, %dM params, ~%dMB, %s) | Load: %.1fms\n",
          model.config.hidden_size / 1024.0,
          model.config.num_hidden_layers,
          model.config.num_attention_heads,
          (model.config.hidden_size * model.config.num_hidden_layers * 4) / 1000000,
          model_size_mb,
+         dtype_str,
          load_time);
 
   simd_init();

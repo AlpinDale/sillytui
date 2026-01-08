@@ -10,30 +10,36 @@
 extern "C" {
 #endif
 
+typedef enum {
+  QWEN3_DTYPE_F32 = 0,
+  QWEN3_DTYPE_F16 = 1,
+} qwen3_dtype_t;
+
 typedef struct {
-  float *q_proj;
-  float *k_proj;
-  float *v_proj;
-  float *o_proj;
-  float *q_norm;
-  float *k_norm;
-  float *gate_proj;
-  float *up_proj;
-  float *down_proj;
-  float *attn_norm;
-  float *ffn_norm;
+  void *q_proj;
+  void *k_proj;
+  void *v_proj;
+  void *o_proj;
+  void *q_norm;
+  void *k_norm;
+  void *gate_proj;
+  void *up_proj;
+  void *down_proj;
+  void *attn_norm;
+  void *ffn_norm;
 } qwen3_layer_weights_t;
 
 typedef struct {
-  float *embed_tokens;
-  float *norm;
-  float *lm_head;
+  void *embed_tokens;
+  void *norm;
+  void *lm_head;
   qwen3_layer_weights_t *layers;
   int num_layers;
+  qwen3_dtype_t dtype;
 } qwen3_weights_t;
 
 bool qwen3_weights_load(qwen3_weights_t *weights, const qwen3_config_t *config,
-                        const char *model_path);
+                        const char *model_path, qwen3_dtype_t dtype);
 void qwen3_weights_free(qwen3_weights_t *weights);
 
 #ifdef __cplusplus

@@ -12,4 +12,15 @@ void qwen3_attention_layer_f32(
     int cache_len, int hidden_size, int num_heads, int num_kv_heads,
     int head_dim, float rope_theta, int max_position);
 
+void qwen3_attention_layer_f16(uint16_t *output, const uint16_t *input,
+                               const uint16_t *q_proj, const uint16_t *k_proj,
+                               const uint16_t *v_proj, const uint16_t *o_proj,
+                               const uint16_t *q_norm, const uint16_t *k_norm,
+                               uint16_t *key_cache, uint16_t *value_cache,
+                               const int64_t *position_ids,
+                               const uint16_t *cos_sin_cache, int seq_len,
+                               int cache_len, int hidden_size, int num_heads,
+                               int num_kv_heads, int head_dim, float rope_theta,
+                               int max_position);
+
 #endif

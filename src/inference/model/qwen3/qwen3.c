@@ -9,11 +9,13 @@
 #include <stdlib.h>
 #include <string.h>
 
-bool qwen3_model_load(qwen3_model_t *model, const char *model_dir) {
+bool qwen3_model_load(qwen3_model_t *model, const char *model_dir,
+                      qwen3_dtype_t dtype) {
   if (!model || !model_dir)
     return false;
 
   memset(model, 0, sizeof(*model));
+  model->dtype = dtype;
 
   char config_path[512];
   snprintf(config_path, sizeof(config_path), "%s/config.json", model_dir);
@@ -24,7 +26,7 @@ bool qwen3_model_load(qwen3_model_t *model, const char *model_dir) {
 
   char model_path[512];
   snprintf(model_path, sizeof(model_path), "%s/model.safetensors", model_dir);
-  if (!qwen3_weights_load(&model->weights, &model->config, model_path)) {
+  if (!qwen3_weights_load(&model->weights, &model->config, model_path, dtype)) {
     fprintf(stderr, "Failed to load weights from %s\n", model_path);
     qwen3_config_free(&model->config);
     return false;
@@ -33,9 +35,9 @@ bool qwen3_model_load(qwen3_model_t *model, const char *model_dir) {
   model->max_seq_len = model->config.max_position_embeddings;
 
   model->key_cache =
-      (float **)calloc(model->config.num_hidden_layers, sizeof(float *));
+      (void **)calloc(model->config.num_hidden_layers, sizeof(void *));
   model->value_cache =
-      (float **)calloc(model->config.num_hidden_layers, sizeof(float *));
+      (void **)calloc(model->config.num_hidden_layers, sizeof(void *));
   model->cache_len =
       (int *)calloc(model->config.num_hidden_layers, sizeof(int));
 
@@ -46,9 +48,11 @@ bool qwen3_model_load(qwen3_model_t *model, const char *model_dir) {
 
   int kv_cache_size = model->max_seq_len * model->config.num_key_value_heads *
                       model->config.head_dim;
+  size_t elem_size =
+      (dtype == QWEN3_DTYPE_F16) ? sizeof(uint16_t) : sizeof(float);
   for (int i = 0; i < model->config.num_hidden_layers; i++) {
-    model->key_cache[i] = (float *)calloc(kv_cache_size, sizeof(float));
-    model->value_cache[i] = (float *)calloc(kv_cache_size, sizeof(float));
+    model->key_cache[i] = calloc(kv_cache_size, elem_size);
+    model->value_cache[i] = calloc(kv_cache_size, elem_size);
     if (!model->key_cache[i] || !model->value_cache[i]) {
       qwen3_model_free(model);
       return false;
@@ -57,16 +61,35 @@ bool qwen3_model_load(qwen3_model_t *model, const char *model_dir) {
 
   int rot_dim = model->config.head_dim;
   int cache_size = model->max_seq_len * rot_dim * 2;
-  model->cos_sin_cache = (float *)malloc(cache_size * sizeof(float));
-  if (!model->cos_sin_cache) {
-    qwen3_model_free(model);
-    return false;
+  if (dtype == QWEN3_DTYPE_F16) {
+    float *cos_sin_f32 = (float *)malloc(cache_size * sizeof(float));
+    if (!cos_sin_f32) {
+      qwen3_model_free(model);
+      return false;
+    }
+    rope_compute_cos_sin_cache_f32(cos_sin_f32, model->max_seq_len, rot_dim,
+                                   model->config.rope_theta);
+    model->cos_sin_cache = malloc(cache_size * sizeof(uint16_t));
+    if (!model->cos_sin_cache) {
+      free(cos_sin_f32);
+      qwen3_model_free(model);
+      return false;
+    }
+    f32_array_to_f16(cos_sin_f32, (uint16_t *)model->cos_sin_cache, cache_size);
+    free(cos_sin_f32);
+  } else {
+    model->cos_sin_cache = malloc(cache_size * sizeof(float));
+    if (!model->cos_sin_cache) {
+      qwen3_model_free(model);
+      return false;
+    }
+    rope_compute_cos_sin_cache_f32((float *)model->cos_sin_cache,
+                                   model->max_seq_len, rot_dim,
+                                   model->config.rope_theta);
   }
-  rope_compute_cos_sin_cache_f32(model->cos_sin_cache, model->max_seq_len,
-                                 rot_dim, model->config.rope_theta);
 
   model->temp_buffer_size = model->config.hidden_size * 8;
-  model->temp_buffer = (float *)malloc(model->temp_buffer_size * sizeof(float));
+  model->temp_buffer = malloc(model->temp_buffer_size * elem_size);
   if (!model->temp_buffer) {
     qwen3_model_free(model);
     return false;
@@ -123,30 +146,18 @@ bool qwen3_forward(qwen3_model_t *model, float *logits, const int *token_ids,
   if (!model || !logits || !token_ids || num_tokens <= 0)
     return false;
 
-  float *hidden =
-      (float *)malloc(num_tokens * model->config.hidden_size * sizeof(float));
-  if (!hidden)
-    return false;
-
   int64_t *token_ids_i64 = (int64_t *)malloc(num_tokens * sizeof(int64_t));
-  if (!token_ids_i64) {
-    free(hidden);
+  if (!token_ids_i64)
     return false;
-  }
   for (int i = 0; i < num_tokens; i++) {
     token_ids_i64[i] = token_ids[i];
   }
-  embedding_lookup_f32(hidden, token_ids_i64, model->weights.embed_tokens,
-                       num_tokens, model->config.vocab_size,
-                       model->config.hidden_size, -1);
-  free(token_ids_i64);
 
   int64_t *position_ids = (int64_t *)malloc(num_tokens * sizeof(int64_t));
   if (!position_ids) {
-    free(hidden);
+    free(token_ids_i64);
     return false;
   }
-
   int start_pos = 0;
   if (model->cache_len && model->cache_len[0] > 0) {
     start_pos = model->cache_len[0];
@@ -155,64 +166,154 @@ bool qwen3_forward(qwen3_model_t *model, float *logits, const int *token_ids,
     position_ids[i] = start_pos + i;
   }
 
-  float *layer_input = hidden;
-  float *layer_output =
-      (float *)malloc(num_tokens * model->config.hidden_size * sizeof(float));
-  if (!layer_output) {
-    free(hidden);
-    free(position_ids);
-    return false;
-  }
+  if (model->dtype == QWEN3_DTYPE_F16) {
+    uint16_t *hidden = (uint16_t *)malloc(
+        num_tokens * model->config.hidden_size * sizeof(uint16_t));
+    if (!hidden) {
+      free(token_ids_i64);
+      free(position_ids);
+      return false;
+    }
 
-  for (int layer_idx = 0; layer_idx < model->config.num_hidden_layers;
-       layer_idx++) {
-    qwen3_transformer_layer_f32(
-        layer_output, layer_input, &model->weights.layers[layer_idx],
-        model->key_cache[layer_idx], model->value_cache[layer_idx],
-        position_ids, model->cos_sin_cache, &model->config, num_tokens,
-        model->cache_len[layer_idx], layer_idx);
+    embedding_lookup_f16(
+        hidden, token_ids_i64, (uint16_t *)model->weights.embed_tokens,
+        num_tokens, model->config.vocab_size, model->config.hidden_size, -1);
+    free(token_ids_i64);
 
-    model->cache_len[layer_idx] += num_tokens;
+    uint16_t *layer_input = hidden;
+    uint16_t *layer_output = (uint16_t *)malloc(
+        num_tokens * model->config.hidden_size * sizeof(uint16_t));
+    if (!layer_output) {
+      free(hidden);
+      free(position_ids);
+      return false;
+    }
 
-    float *tmp = layer_input;
-    layer_input = layer_output;
-    layer_output = tmp;
-  }
+    for (int layer_idx = 0; layer_idx < model->config.num_hidden_layers;
+         layer_idx++) {
+      qwen3_transformer_layer_f16(
+          layer_output, layer_input, &model->weights.layers[layer_idx],
+          (uint16_t *)model->key_cache[layer_idx],
+          (uint16_t *)model->value_cache[layer_idx], position_ids,
+          (uint16_t *)model->cos_sin_cache, &model->config, num_tokens,
+          model->cache_len[layer_idx], layer_idx);
 
-  float *final_hidden = layer_input;
+      model->cache_len[layer_idx] += num_tokens;
 
-  if (model->config.num_hidden_layers % 2 == 0) {
-    free(layer_output);
-  }
+      uint16_t *tmp = layer_input;
+      layer_input = layer_output;
+      layer_output = tmp;
+    }
 
-  rms_norm_f32(final_hidden, final_hidden, model->weights.norm,
-               model->config.rms_norm_eps, num_tokens,
-               model->config.hidden_size);
+    uint16_t *final_hidden = layer_input;
 
-  float *all_logits =
-      (float *)malloc(num_tokens * model->config.vocab_size * sizeof(float));
-  if (!all_logits) {
-    free(hidden);
-    free(position_ids);
     if (model->config.num_hidden_layers % 2 == 0) {
       free(layer_output);
     }
-    return false;
-  }
 
-  gemm_f32(final_hidden, model->weights.lm_head, all_logits, num_tokens,
-           model->config.vocab_size, model->config.hidden_size, false, true);
+    rms_norm_f16(final_hidden, final_hidden, (uint16_t *)model->weights.norm,
+                 model->config.rms_norm_eps, num_tokens,
+                 model->config.hidden_size);
 
-  float *last_token_logits =
-      all_logits + (num_tokens - 1) * model->config.vocab_size;
-  memcpy(logits, last_token_logits, model->config.vocab_size * sizeof(float));
+    uint16_t *all_logits_f16 = (uint16_t *)malloc(
+        num_tokens * model->config.vocab_size * sizeof(uint16_t));
+    if (!all_logits_f16) {
+      free(hidden);
+      free(position_ids);
+      if (model->config.num_hidden_layers % 2 == 0) {
+        free(layer_output);
+      }
+      return false;
+    }
 
-  free(all_logits);
-  free(hidden);
-  free(position_ids);
+    gemm_f16(final_hidden, (uint16_t *)model->weights.lm_head, all_logits_f16,
+             num_tokens, model->config.vocab_size, model->config.hidden_size);
 
-  if (model->config.num_hidden_layers % 2 == 1) {
-    free(layer_output);
+    uint16_t *last_token_logits_f16 =
+        all_logits_f16 + (num_tokens - 1) * model->config.vocab_size;
+    f16_array_to_f32(last_token_logits_f16, logits, model->config.vocab_size);
+
+    free(all_logits_f16);
+    free(hidden);
+    free(position_ids);
+
+    if (model->config.num_hidden_layers % 2 == 1) {
+      free(layer_output);
+    }
+  } else {
+    float *hidden =
+        (float *)malloc(num_tokens * model->config.hidden_size * sizeof(float));
+    if (!hidden) {
+      free(token_ids_i64);
+      free(position_ids);
+      return false;
+    }
+
+    embedding_lookup_f32(
+        hidden, token_ids_i64, (float *)model->weights.embed_tokens, num_tokens,
+        model->config.vocab_size, model->config.hidden_size, -1);
+    free(token_ids_i64);
+
+    float *layer_input = hidden;
+    float *layer_output =
+        (float *)malloc(num_tokens * model->config.hidden_size * sizeof(float));
+    if (!layer_output) {
+      free(hidden);
+      free(position_ids);
+      return false;
+    }
+
+    for (int layer_idx = 0; layer_idx < model->config.num_hidden_layers;
+         layer_idx++) {
+      qwen3_transformer_layer_f32(
+          layer_output, layer_input, &model->weights.layers[layer_idx],
+          (float *)model->key_cache[layer_idx],
+          (float *)model->value_cache[layer_idx], position_ids,
+          (float *)model->cos_sin_cache, &model->config, num_tokens,
+          model->cache_len[layer_idx], layer_idx);
+
+      model->cache_len[layer_idx] += num_tokens;
+
+      float *tmp = layer_input;
+      layer_input = layer_output;
+      layer_output = tmp;
+    }
+
+    float *final_hidden = layer_input;
+
+    if (model->config.num_hidden_layers % 2 == 0) {
+      free(layer_output);
+    }
+
+    rms_norm_f32(final_hidden, final_hidden, (float *)model->weights.norm,
+                 model->config.rms_norm_eps, num_tokens,
+                 model->config.hidden_size);
+
+    float *all_logits =
+        (float *)malloc(num_tokens * model->config.vocab_size * sizeof(float));
+    if (!all_logits) {
+      free(hidden);
+      free(position_ids);
+      if (model->config.num_hidden_layers % 2 == 0) {
+        free(layer_output);
+      }
+      return false;
+    }
+
+    gemm_f32((float *)model->weights.lm_head, final_hidden, all_logits,
+             model->config.vocab_size, num_tokens, model->config.hidden_size,
+             false, true);
+
+    memcpy(logits, all_logits + (num_tokens - 1) * model->config.vocab_size,
+           model->config.vocab_size * sizeof(float));
+
+    free(all_logits);
+    free(hidden);
+    free(position_ids);
+
+    if (model->config.num_hidden_layers % 2 == 1) {
+      free(layer_output);
+    }
   }
 
   return true;
