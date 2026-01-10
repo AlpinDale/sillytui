@@ -10,10 +10,10 @@ permissions:
 
 jobs:
   build-linux:
-    runs-on: ubuntu-22.04
-    container:
-      image: ubuntu:20.04
-      options: --privileged
+    runs-on: self-hosted
+    # container:
+    #   image: ubuntu:20.04
+    #   options: --privileged
     steps:
       - name: Clone
         uses: actions/checkout@v3
