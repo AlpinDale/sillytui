@@ -4,6 +4,7 @@
  * Uses fast polynomial approximations for transcendental functions.
  */
 
+#include "inference/backend/caps.h"
 #include "inference/kernels/activation/activation_kernels.h"
 #include <math.h>
 #include <string.h>
@@ -17,9 +18,9 @@
 
 activation_caps_t activation_get_capabilities(void) {
   activation_caps_t caps = {0};
-#if HAS_NEON
-  caps.has_neon = true;
-#endif
+  caps.has_neon = caps_has(CAP_NEON);
+  caps.has_avx2 = caps_has(CAP_AVX2);
+  caps.has_avx512 = caps_has(CAP_AVX512);
   return caps;
 }
 

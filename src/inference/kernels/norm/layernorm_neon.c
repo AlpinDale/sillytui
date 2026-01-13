@@ -2,15 +2,14 @@
  * ARM NEON optimized layernorm kernels
  */
 
+#include "inference/backend/caps.h"
 #include "inference/kernels/norm/layernorm_kernels.h"
 #include <math.h>
 #include <string.h>
 
 norm_caps_t norm_get_capabilities(void) {
   norm_caps_t caps = {0};
-#if defined(__ARM_NEON) || defined(__aarch64__)
-  caps.has_neon = true;
-#endif
+  caps.has_neon = caps_has(CAP_NEON);
   return caps;
 }
 

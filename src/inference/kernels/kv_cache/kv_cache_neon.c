@@ -2,6 +2,7 @@
  * KV Cache - NEON Optimized Implementation
  */
 
+#include "inference/backend/caps.h"
 #include "inference/kernels/kv_cache/kv_cache_kernels.h"
 #include <string.h>
 
@@ -14,9 +15,7 @@
 
 kv_cache_caps_t kv_cache_get_capabilities(void) {
   kv_cache_caps_t caps = {0};
-#if HAS_NEON
-  caps.has_neon = true;
-#endif
+  caps.has_neon = caps_has(CAP_NEON);
   return caps;
 }
 

@@ -2,6 +2,7 @@
  * Token Sampling - NEON Optimized Implementation
  */
 
+#include "inference/backend/caps.h"
 #include "inference/kernels/sampling/sampling_kernels.h"
 #include <float.h>
 #include <math.h>
@@ -17,9 +18,7 @@
 
 sampling_caps_t sampling_get_capabilities(void) {
   sampling_caps_t caps = {0};
-#if HAS_NEON
-  caps.has_neon = true;
-#endif
+  caps.has_neon = caps_has(CAP_NEON);
   return caps;
 }
 

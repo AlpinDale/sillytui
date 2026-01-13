@@ -2,6 +2,7 @@
  * Rotary Position Embeddings - NEON Optimized Implementations
  */
 
+#include "inference/backend/caps.h"
 #include "inference/kernels/rope/rope_kernels.h"
 #include <string.h>
 
@@ -14,9 +15,7 @@
 
 rope_caps_t rope_get_capabilities(void) {
   rope_caps_t caps = {0};
-#if HAS_NEON
-  caps.has_neon = true;
-#endif
+  caps.has_neon = caps_has(CAP_NEON);
   return caps;
 }
 

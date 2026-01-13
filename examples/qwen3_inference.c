@@ -1,3 +1,4 @@
+#include "inference/core/dtype.h"
 #include "inference/model/qwen3/qwen3.h"
 #include "inference/tokenizer/gpt2bpe.h"
 #include "inference/tokenizer/simd.h"
@@ -39,7 +40,7 @@ int main(int argc, char **argv) {
     return 1;
   }
 
-  qwen3_dtype_t dtype = QWEN3_DTYPE_F16;
+  dtype_t dtype = DTYPE_F16;
   const char *model_dir = NULL;
   const char *prompt = NULL;
 
@@ -51,9 +52,9 @@ int main(int argc, char **argv) {
       }
       i++;
       if (strcmp(argv[i], "f32") == 0) {
-        dtype = QWEN3_DTYPE_F32;
+        dtype = DTYPE_F32;
       } else if (strcmp(argv[i], "f16") == 0) {
-        dtype = QWEN3_DTYPE_F16;
+        dtype = DTYPE_F16;
       } else {
         fprintf(stderr, "Error: Invalid dtype '%s'. Use 'f32' or 'f16'\n", argv[i]);
         return 1;
@@ -84,7 +85,7 @@ int main(int argc, char **argv) {
   double load_time = get_time_ms() - load_start;
 
   int model_size_mb = estimate_model_size_mb(&model);
-  const char *dtype_str = (dtype == QWEN3_DTYPE_F16) ? "f16" : "f32";
+  const char *dtype_str = (dtype == DTYPE_F16) ? "f16" : "f32";
   printf("Model: Qwen3-%.1fB (L%d, H%d, %dM params, ~%dMB, %s) | Load: %.1fms\n",
          model.config.hidden_size / 1024.0,
          model.config.num_hidden_layers,
@@ -170,6 +171,7 @@ int main(int argc, char **argv) {
   double decode_start = get_time_ms();
   double first_token_time = 0;
   int is_tty = isatty(fileno(stdout));
+  (void)is_tty;
 
   for (int i = 0; i < max_tokens; i++) {
     current_token = sampling_sample_f32(logits, model.config.vocab_size,
@@ -210,32 +212,32 @@ int main(int argc, char **argv) {
   printf("  Decode time:      %.1f ms  (%.1f tok/s)\n", decode_time, output_tok_per_s);
   printf("  Time to 1st:      %.1f ms\n", time_to_first_token);
   printf("  Total time:       %.1f ms\n", prefill_time + decode_time);
-  
+
   long long bytes_processed = 0;
   long long hidden_size_bytes = (long long)model.config.hidden_size * 4;
   long long head_dim_bytes = (long long)model.config.head_dim * 4;
-  
-  long long per_layer_weight_bytes = 
+
+  long long per_layer_weight_bytes =
     (long long)model.config.hidden_size * model.config.hidden_size * 4 * 4 +
     (long long)model.config.hidden_size * model.config.intermediate_size * 4 * 2 +
     (long long)model.config.intermediate_size * model.config.hidden_size * 4;
-  
+
   long long total_weight_bytes = per_layer_weight_bytes * model.config.num_hidden_layers +
                                  (long long)model.config.vocab_size * model.config.hidden_size * 4 * 2;
-  
-  long long activation_bytes = (long long)(num_input_tokens + num_generated) * 
+
+  long long activation_bytes = (long long)(num_input_tokens + num_generated) *
                                 hidden_size_bytes * model.config.num_hidden_layers * 2;
-  
-  long long kv_cache_bytes = (long long)model.config.num_hidden_layers * 
-                             (num_input_tokens + num_generated) * 
-                             model.config.num_key_value_heads * 
+
+  long long kv_cache_bytes = (long long)model.config.num_hidden_layers *
+                             (num_input_tokens + num_generated) *
+                             model.config.num_key_value_heads *
                              head_dim_bytes * 2;
-  
-  bytes_processed = total_weight_bytes * (num_input_tokens + num_generated) + 
+
+  bytes_processed = total_weight_bytes * (num_input_tokens + num_generated) +
                     activation_bytes + kv_cache_bytes;
-  
+
   double total_time_s = (prefill_time + decode_time) / 1000.0;
-  double memory_bandwidth_gb_s = total_time_s > 0 ? 
+  double memory_bandwidth_gb_s = total_time_s > 0 ?
     (bytes_processed / total_time_s) / (1024.0 * 1024.0 * 1024.0) : 0.0;
   printf("  Est. mem BW:      %.2f GB/s\n", memory_bandwidth_gb_s);
   printf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
@@ -247,4 +249,3 @@ int main(int argc, char **argv) {
   qwen3_model_free(&model);
   return 0;
 }
-

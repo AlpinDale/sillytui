@@ -1,16 +1,18 @@
 #include "inference/model/base.h"
+#include "inference/core/dtype.h"
 #include "inference/model/qwen3/qwen3.h"
+#include "inference/model/registry.h"
 #include <stdlib.h>
 #include <string.h>
 
-static qwen3_dtype_t inference_to_qwen3_dtype(inference_dtype_t dtype) {
-  return (dtype == INFERENCE_DTYPE_F16) ? QWEN3_DTYPE_F16 : QWEN3_DTYPE_F32;
+static dtype_t inference_to_dtype(inference_dtype_t dtype) {
+  return (dtype == INFERENCE_DTYPE_F16) ? DTYPE_F16 : DTYPE_F32;
 }
 
 static bool qwen3_load_wrapper(inference_model_t *model, const char *model_dir,
                                inference_dtype_t dtype) {
   qwen3_model_t *qwen3 = (qwen3_model_t *)model->impl;
-  return qwen3_model_load(qwen3, model_dir, inference_to_qwen3_dtype(dtype));
+  return qwen3_model_load(qwen3, model_dir, inference_to_dtype(dtype));
 }
 
 static void qwen3_free_wrapper(inference_model_t *model) {
@@ -40,6 +42,8 @@ static int qwen3_generate_wrapper(inference_model_t *model, int *output_tokens,
                         num_input_tokens, temperature, top_k, top_p);
 }
 
+static void *qwen3_alloc_impl(void) { return calloc(1, sizeof(qwen3_model_t)); }
+
 static const inference_model_ops_t qwen3_ops = {
     .load = qwen3_load_wrapper,
     .free = qwen3_free_wrapper,
@@ -48,35 +52,53 @@ static const inference_model_ops_t qwen3_ops = {
     .generate = qwen3_generate_wrapper,
 };
 
+__attribute__((constructor)) static void register_qwen3_model(void) {
+  model_register("qwen3", &qwen3_ops);
+  model_register("qwen2", &qwen3_ops);
+}
+
+static void *alloc_impl_for_model(const char *model_type) {
+  if (strcmp(model_type, "qwen3") == 0 || strcmp(model_type, "qwen2") == 0)
+    return qwen3_alloc_impl();
+  return NULL;
+}
+
 bool inference_model_load(inference_model_t *model, const char *model_type,
                           const char *model_dir, inference_dtype_t dtype) {
-  if (!model || !model_type || !model_dir)
+  if (!model || !model_dir)
     return false;
 
   memset(model, 0, sizeof(*model));
   model->dtype = dtype;
 
-  if (strcmp(model_type, "qwen3") == 0) {
-    qwen3_model_t *qwen3 = (qwen3_model_t *)calloc(1, sizeof(qwen3_model_t));
-    if (!qwen3)
-      return false;
+  const char *arch = model_type;
+  if (!arch || arch[0] == '\0')
+    arch = model_detect_arch(model_dir);
 
-    model->ops = &qwen3_ops;
-    model->impl = qwen3;
+  if (!arch)
+    return false;
 
-    return model->ops->load(model, model_dir, dtype);
-  }
+  const inference_model_ops_t *ops = model_get_by_name(arch);
+  if (!ops)
+    return false;
 
-  return false;
+  void *impl = alloc_impl_for_model(arch);
+  if (!impl)
+    return false;
+
+  model->ops = ops;
+  model->impl = impl;
+
+  return model->ops->load(model, model_dir, dtype);
 }
 
 void inference_model_free(inference_model_t *model) {
   if (!model || !model->ops)
     return;
 
-  if (model->ops->free) {
+  if (model->ops->free)
     model->ops->free(model);
-  }
+
   memset(model, 0, sizeof(*model));
 }
 

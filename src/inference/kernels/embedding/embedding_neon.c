@@ -2,6 +2,7 @@
  * Embedding Lookup - NEON Optimized Implementation
  */
 
+#include "inference/backend/caps.h"
 #include "inference/kernels/embedding/embedding_kernels.h"
 #include <string.h>
 
@@ -14,9 +15,7 @@
 
 embedding_caps_t embedding_get_capabilities(void) {
   embedding_caps_t caps = {0};
-#if HAS_NEON
-  caps.has_neon = true;
-#endif
+  caps.has_neon = caps_has(CAP_NEON);
   return caps;
 }
 

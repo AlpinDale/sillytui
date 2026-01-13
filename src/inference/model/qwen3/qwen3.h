@@ -1,16 +1,17 @@
 #ifndef QWEN3_H
 #define QWEN3_H
 
-#include "config.h"
+#include "inference/core/dtype.h"
+#include "inference/model/config.h"
 #include "weights.h"
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
 typedef struct {
-  qwen3_config_t config;
+  model_config_t config;
   qwen3_weights_t weights;
-  qwen3_dtype_t dtype;
+  dtype_t dtype;
 
   void **key_cache;
   void **value_cache;
@@ -24,7 +25,7 @@ typedef struct {
 } qwen3_model_t;
 
 bool qwen3_model_load(qwen3_model_t *model, const char *model_dir,
-                      qwen3_dtype_t dtype);
+                      dtype_t dtype);
 void qwen3_model_free(qwen3_model_t *model);
 void qwen3_model_reset_cache(qwen3_model_t *model);
 
