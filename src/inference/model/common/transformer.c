@@ -1,4 +1,5 @@
 #include "transformer.h"
+#include "inference/core/dtype.h"
 #include "inference/kernels/norm/layernorm.h"
 #include <stdlib.h>
 #include <string.h>
@@ -78,16 +79,11 @@ void transformer_layer_forward_f16(uint16_t *output, const uint16_t *input,
                         value_cache, position_ids, cos_sin_cache, seq_len,
                         cache_len);
 
+  /* Residual connection: residual = input + attn_out */
   for (int i = 0; i < seq_len * hidden_size; i++) {
-    uint32_t a_bits = ((uint32_t)input[i]) << 16;
-    uint32_t b_bits = ((uint32_t)attn_out[i]) << 16;
-    float a, b;
-    memcpy(&a, &a_bits, sizeof(float));
-    memcpy(&b, &b_bits, sizeof(float));
-    float sum = a + b;
-    uint32_t sum_bits;
-    memcpy(&sum_bits, &sum, sizeof(float));
-    residual[i] = (uint16_t)(sum_bits >> 16);
+    float a = f16_to_f32(input[i]);
+    float b = f16_to_f32(attn_out[i]);
+    residual[i] = f32_to_f16(a + b);
   }
 
   const uint16_t *post_norm_w = tensor_data_f16_const(layer->post_attn_norm);
@@ -96,16 +92,11 @@ void transformer_layer_forward_f16(uint16_t *output, const uint16_t *input,
 
   ffn_forward_f16(attn_out, normed, &layer->ffn, seq_len);
 
+  /* Residual connection: output = residual + ffn_out */
   for (int i = 0; i < seq_len * hidden_size; i++) {
-    uint32_t a_bits = ((uint32_t)residual[i]) << 16;
-    uint32_t b_bits = ((uint32_t)attn_out[i]) << 16;
-    float a, b;
-    memcpy(&a, &a_bits, sizeof(float));
-    memcpy(&b, &b_bits, sizeof(float));
-    float sum = a + b;
-    uint32_t sum_bits;
-    memcpy(&sum_bits, &sum, sizeof(float));
-    output[i] = (uint16_t)(sum_bits >> 16);
+    float a = f16_to_f32(residual[i]);
+    float b = f16_to_f32(attn_out[i]);
+    output[i] = f32_to_f16(a + b);
   }
 
   free(normed);
