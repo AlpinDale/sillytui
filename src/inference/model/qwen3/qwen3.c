@@ -258,31 +258,65 @@ bool qwen3_forward(qwen3_model_t *model, float *logits, const int *token_ids,
                  tensor_data_f16(model->weights.final_norm),
                  model->config.norm_eps, num_tokens, model->config.hidden_size);
 
-    uint16_t *all_logits_f16 = (uint16_t *)malloc(
-        num_tokens * model->config.vocab_size * sizeof(uint16_t));
-    if (!all_logits_f16) {
+    /* Use optimized F32 path for single-token decode (common case).
+     * The pre-converted lm_head_f32 avoids ~11ms F16→F32 conversion. */
+    if (num_tokens == 1 && model->weights.lm_head_f32) {
+      float *final_hidden_f32 =
+          (float *)malloc(model->config.hidden_size * sizeof(float));
+      if (!final_hidden_f32) {
+        free(hidden);
+        free(position_ids);
+        if (model->config.num_hidden_layers % 2 == 0) {
+          free(layer_output);
+        }
+        return false;
+      }
+
+      /* Convert final hidden state to F32 */
+      f16_to_f32_array(final_hidden, final_hidden_f32,
+                       model->config.hidden_size);
+
+      /* F32 GEMV: logits = final_hidden × lm_head
+       * lm_head_f32 is [hidden, vocab] (same transposed layout as F16 lm_head)
+       * So: [1, vocab] = [1, hidden] × [hidden, vocab] */
+      gemm_f32(final_hidden_f32, tensor_data_f32(model->weights.lm_head_f32),
+               logits, 1, model->config.vocab_size, model->config.hidden_size,
+               false, false);
+
+      free(final_hidden_f32);
       free(hidden);
       free(position_ids);
-      if (model->config.num_hidden_layers % 2 == 0) {
+      if (model->config.num_hidden_layers % 2 == 1) {
         free(layer_output);
       }
-      return false;
-    }
+    } else {
+      /* Multi-token (prefill) path - use F16 GEMM */
+      uint16_t *all_logits_f16 = (uint16_t *)malloc(
+          num_tokens * model->config.vocab_size * sizeof(uint16_t));
+      if (!all_logits_f16) {
+        free(hidden);
+        free(position_ids);
+        if (model->config.num_hidden_layers % 2 == 0) {
+          free(layer_output);
+        }
+        return false;
+      }
 
-    gemm_f16(final_hidden, tensor_data_f16(model->weights.lm_head),
-             all_logits_f16, num_tokens, model->config.vocab_size,
-             model->config.hidden_size);
+      gemm_f16(final_hidden, tensor_data_f16(model->weights.lm_head),
+               all_logits_f16, num_tokens, model->config.vocab_size,
+               model->config.hidden_size);
 
-    uint16_t *last_token_logits_f16 =
-        all_logits_f16 + (num_tokens - 1) * model->config.vocab_size;
-    f16_to_f32_array(last_token_logits_f16, logits, model->config.vocab_size);
+      uint16_t *last_token_logits_f16 =
+          all_logits_f16 + (num_tokens - 1) * model->config.vocab_size;
+      f16_to_f32_array(last_token_logits_f16, logits, model->config.vocab_size);
 
-    free(all_logits_f16);
-    free(hidden);
-    free(position_ids);
+      free(all_logits_f16);
+      free(hidden);
+      free(position_ids);
 
-    if (model->config.num_hidden_layers % 2 == 1) {
-      free(layer_output);
+      if (model->config.num_hidden_layers % 2 == 1) {
+        free(layer_output);
+      }
     }
   } else {
     float *hidden =
