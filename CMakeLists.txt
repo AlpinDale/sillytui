@@ -33,30 +33,6 @@ endif()
 find_package(Curses REQUIRED)
 find_package(CURL REQUIRED)
 
-set(ULIGHT_SOURCES
-    src/ui/syntax/ulight/chars.cpp
-    src/ui/syntax/ulight/io.cpp
-    src/ui/syntax/ulight/parse_utils.cpp
-    src/ui/syntax/ulight/ulight.cpp
-    src/ui/syntax/ulight/lang/bash.cpp
-    src/ui/syntax/ulight/lang/cowel.cpp
-    src/ui/syntax/ulight/lang/cpp.cpp
-    src/ui/syntax/ulight/lang/css.cpp
-    src/ui/syntax/ulight/lang/diff.cpp
-    src/ui/syntax/ulight/lang/ebnf.cpp
-    src/ui/syntax/ulight/lang/html.cpp
-    src/ui/syntax/ulight/lang/js.cpp
-    src/ui/syntax/ulight/lang/json.cpp
-    src/ui/syntax/ulight/lang/kotlin.cpp
-    src/ui/syntax/ulight/lang/llvm.cpp
-    src/ui/syntax/ulight/lang/lua.cpp
-    src/ui/syntax/ulight/lang/nasm.cpp
-    src/ui/syntax/ulight/lang/python.cpp
-    src/ui/syntax/ulight/lang/rust.cpp
-    src/ui/syntax/ulight/lang/tex.cpp
-    src/ui/syntax/ulight/lang/xml.cpp
-)
-
 set(SOURCES
     src/main.c
     src/core/config.c
@@ -135,12 +111,10 @@ elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
     list(APPEND SOURCES src/inference/tokenizer/simd_x86_64.S)
 endif()
 
-add_executable(sillytui ${SOURCES} ${ULIGHT_SOURCES})
-
-set_source_files_properties(${ULIGHT_SOURCES} PROPERTIES COMPILE_FLAGS "-Wno-trigraphs -Wno-error")
+add_executable(sillytui ${SOURCES})
 
 target_compile_definitions(sillytui PRIVATE _XOPEN_SOURCE_EXTENDED NCURSES_WIDECHAR=1)
-target_include_directories(sillytui PRIVATE ${CURSES_INCLUDE_DIR} ${CURL_INCLUDE_DIRS} src src/ui/syntax/ulight/include)
+target_include_directories(sillytui PRIVATE ${CURSES_INCLUDE_DIR} ${CURL_INCLUDE_DIRS} src)
 find_package(Threads REQUIRED)
 target_link_libraries(sillytui PRIVATE ${CURSES_LIBRARIES} ${CURL_LIBRARIES} Threads::Threads)
 if(APPLE)
@@ -233,9 +207,9 @@ elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
     list(APPEND TEST_SOURCES src/inference/tokenizer/simd_x86_64.S)
 endif()
 
-add_executable(run_tests ${TEST_SOURCES} ${ULIGHT_SOURCES})
+add_executable(run_tests ${TEST_SOURCES})
 target_compile_definitions(run_tests PRIVATE _XOPEN_SOURCE_EXTENDED NCURSES_WIDECHAR=1)
-target_include_directories(run_tests PRIVATE ${CURSES_INCLUDE_DIR} src tests src/ui/syntax/ulight/include)
+target_include_directories(run_tests PRIVATE ${CURSES_INCLUDE_DIR} src tests)
 target_link_libraries(run_tests PRIVATE ${CURSES_LIBRARIES} ${CURL_LIBRARIES} m Threads::Threads)
 if(APPLE)
     target_link_libraries(run_tests PRIVATE "-framework Accelerate")
@@ -290,9 +264,9 @@ elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
     list(APPEND INTEGRATION_TEST_SOURCES src/inference/tokenizer/simd_x86_64.S)
 endif()
 
-add_executable(run_integration_tests ${INTEGRATION_TEST_SOURCES} ${ULIGHT_SOURCES})
+add_executable(run_integration_tests ${INTEGRATION_TEST_SOURCES})
 target_compile_definitions(run_integration_tests PRIVATE _XOPEN_SOURCE_EXTENDED NCURSES_WIDECHAR=1)
-target_include_directories(run_integration_tests PRIVATE ${CURSES_INCLUDE_DIR} src tests tests/integration src/ui/syntax/ulight/include)
+target_include_directories(run_integration_tests PRIVATE ${CURSES_INCLUDE_DIR} src tests tests/integration)
 target_link_libraries(run_integration_tests PRIVATE ${CURSES_LIBRARIES} ${CURL_LIBRARIES} m Threads::Threads)
 if(APPLE)
     target_link_libraries(run_integration_tests PRIVATE "-framework Accelerate")
@@ -399,12 +373,10 @@ elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
     list(APPEND ALL_TEST_SOURCES src/inference/tokenizer/simd_x86_64.S)
 endif()
 
-add_executable(run_all_tests ${ALL_TEST_SOURCES} ${ULIGHT_SOURCES})
-
-set_source_files_properties(${ULIGHT_SOURCES} PROPERTIES COMPILE_FLAGS "-Wno-trigraphs -Wno-error")
+add_executable(run_all_tests ${ALL_TEST_SOURCES})
 
 target_compile_definitions(run_all_tests PRIVATE _XOPEN_SOURCE_EXTENDED NCURSES_WIDECHAR=1)
-target_include_directories(run_all_tests PRIVATE ${CURSES_INCLUDE_DIR} src tests tests/boundary tests/stress tests/generated tests/property src/ui/syntax/ulight/include)
+target_include_directories(run_all_tests PRIVATE ${CURSES_INCLUDE_DIR} src tests tests/boundary tests/stress tests/generated tests/property)
 target_link_libraries(run_all_tests PRIVATE ${CURSES_LIBRARIES} ${CURL_LIBRARIES} m Threads::Threads)
 if(APPLE)
     target_link_libraries(run_all_tests PRIVATE "-framework Accelerate")
