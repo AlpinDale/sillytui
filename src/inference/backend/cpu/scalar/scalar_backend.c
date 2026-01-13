@@ -364,6 +364,253 @@ static int scalar_sample(backend_t *backend, const tensor_t *logits,
   return result;
 }
 
+/**
+ * RoPE (Rotary Position Embeddings) - NeoX style
+ *
+ * Applies rotary embeddings to query and key tensors:
+ *   q[i] = q[i] * cos - q[half_dim + i] * sin
+ *   q[half_dim + i] = q[half_dim + i] * cos + q[i] * sin
+ */
+static void scalar_rope(backend_t *backend, tensor_t *query, tensor_t *key,
+                        const tensor_t *cos_sin_cache, const int64_t *positions,
+                        int num_heads, int num_kv_heads, int head_dim,
+                        bool is_neox) {
+  (void)backend;
+
+  if (!query || !cos_sin_cache || !positions)
+    return;
+
+  int num_tokens = (int)tensor_dim(query, 0);
+  int rot_dim = head_dim;
+  int half_dim = rot_dim / 2;
+
+  const float *cache = tensor_data_f32_const(cos_sin_cache);
+  float *q = tensor_data_f32(query);
+  float *k = key ? tensor_data_f32(key) : NULL;
+
+  int query_stride = num_heads * head_dim;
+  int key_stride = num_kv_heads * head_dim;
+
+  for (int t = 0; t < num_tokens; t++) {
+    int64_t pos = positions[t];
+    const float *cos_ptr = cache + pos * rot_dim;
+    const float *sin_ptr = cos_ptr + half_dim;
+
+    /* Apply RoPE to query heads */
+    for (int h = 0; h < num_heads; h++) {
+      float *qh = q + t * query_stride + h * head_dim;
+
+      if (is_neox) {
+        /* NeoX style: first half and second half */
+        for (int i = 0; i < half_dim; i++) {
+          float x = qh[i];
+          float y = qh[half_dim + i];
+          float cos_val = cos_ptr[i];
+          float sin_val = sin_ptr[i];
+          qh[i] = x * cos_val - y * sin_val;
+          qh[half_dim + i] = y * cos_val + x * sin_val;
+        }
+      } else {
+        /* GPT-J style: interleaved pairs */
+        for (int i = 0; i < half_dim; i++) {
+          int x_idx = 2 * i;
+          int y_idx = 2 * i + 1;
+          float x = qh[x_idx];
+          float y = qh[y_idx];
+          float cos_val = cos_ptr[i];
+          float sin_val = sin_ptr[i];
+          qh[x_idx] = x * cos_val - y * sin_val;
+          qh[y_idx] = y * cos_val + x * sin_val;
+        }
+      }
+    }
+
+    /* Apply RoPE to key heads */
+    if (k) {
+      for (int h = 0; h < num_kv_heads; h++) {
+        float *kh = k + t * key_stride + h * head_dim;
+
+        if (is_neox) {
+          for (int i = 0; i < half_dim; i++) {
+            float x = kh[i];
+            float y = kh[half_dim + i];
+            float cos_val = cos_ptr[i];
+            float sin_val = sin_ptr[i];
+            kh[i] = x * cos_val - y * sin_val;
+            kh[half_dim + i] = y * cos_val + x * sin_val;
+          }
+        } else {
+          for (int i = 0; i < half_dim; i++) {
+            int x_idx = 2 * i;
+            int y_idx = 2 * i + 1;
+            float x = kh[x_idx];
+            float y = kh[y_idx];
+            float cos_val = cos_ptr[i];
+            float sin_val = sin_ptr[i];
+            kh[x_idx] = x * cos_val - y * sin_val;
+            kh[y_idx] = y * cos_val + x * sin_val;
+          }
+        }
+      }
+    }
+  }
+}
+
+/**
+ * Scaled Dot-Product Attention with KV Cache
+ *
+ * Computes: softmax(Q @ K^T / scale) @ V
+ * Uses online softmax algorithm for numerical stability.
+ */
+static void scalar_attention(backend_t *backend, tensor_t *out,
+                             const tensor_t *Q, const tensor_t *K,
+                             const tensor_t *V, tensor_t *key_cache,
+                             tensor_t *value_cache, int cache_len,
+                             float scale) {
+  (void)backend;
+
+  if (!out || !Q || !K || !V)
+    return;
+
+  int seq_len_q = (int)tensor_dim(Q, 0);
+  int head_dim = (int)tensor_dim(Q, 1);
+  int seq_len_kv = (int)tensor_dim(K, 0);
+
+  const float *query = tensor_data_f32_const(Q);
+  const float *key = tensor_data_f32_const(K);
+  const float *value = tensor_data_f32_const(V);
+  float *output = tensor_data_f32(out);
+
+  /* Get cached keys/values if available */
+  const float *cached_key = key_cache ? tensor_data_f32_const(key_cache) : NULL;
+  const float *cached_value =
+      value_cache ? tensor_data_f32_const(value_cache) : NULL;
+
+  int total_kv_len = cache_len + seq_len_kv;
+
+  float *acc = (float *)calloc(head_dim, sizeof(float));
+
+  for (int q_idx = 0; q_idx < seq_len_q; q_idx++) {
+    const float *q_vec = query + q_idx * head_dim;
+    float *out_vec = output + q_idx * head_dim;
+
+    float M = -__builtin_inff();
+    float L = 0.0f;
+    memset(acc, 0, head_dim * sizeof(float));
+
+    /* Process cached KV first */
+    for (int kv_idx = 0; kv_idx < cache_len; kv_idx++) {
+      const float *k_vec = cached_key + kv_idx * head_dim;
+      const float *v_vec = cached_value + kv_idx * head_dim;
+
+      /* Compute attention score */
+      float s = 0.0f;
+      for (int d = 0; d < head_dim; d++) {
+        s += q_vec[d] * k_vec[d];
+      }
+      s *= scale;
+
+      /* Online softmax update */
+      float M_new = (s > M) ? s : M;
+      float exp_M_diff = expf(M - M_new);
+
+      for (int d = 0; d < head_dim; d++) {
+        acc[d] *= exp_M_diff;
+      }
+      L *= exp_M_diff;
+
+      float p = expf(s - M_new);
+      for (int d = 0; d < head_dim; d++) {
+        acc[d] += v_vec[d] * p;
+      }
+      L += p;
+
+      M = M_new;
+    }
+
+    /* Process new KV */
+    for (int kv_idx = 0; kv_idx < seq_len_kv; kv_idx++) {
+      const float *k_vec = key + kv_idx * head_dim;
+      const float *v_vec = value + kv_idx * head_dim;
+
+      /* Apply causal mask: can only attend to positions <= q_idx */
+      if (cache_len + kv_idx > cache_len + q_idx)
+        continue;
+
+      float s = 0.0f;
+      for (int d = 0; d < head_dim; d++) {
+        s += q_vec[d] * k_vec[d];
+      }
+      s *= scale;
+
+      float M_new = (s > M) ? s : M;
+      float exp_M_diff = expf(M - M_new);
+
+      for (int d = 0; d < head_dim; d++) {
+        acc[d] *= exp_M_diff;
+      }
+      L *= exp_M_diff;
+
+      float p = expf(s - M_new);
+      for (int d = 0; d < head_dim; d++) {
+        acc[d] += v_vec[d] * p;
+      }
+      L += p;
+
+      M = M_new;
+    }
+
+    /* Normalize */
+    if (L > 0.0f) {
+      float inv_L = 1.0f / L;
+      for (int d = 0; d < head_dim; d++) {
+        out_vec[d] = acc[d] * inv_L;
+      }
+    } else {
+      memset(out_vec, 0, head_dim * sizeof(float));
+    }
+  }
+
+  (void)total_kv_len;
+  free(acc);
+}
+
+/**
+ * KV Cache Update
+ *
+ * Appends new keys and values to the cache.
+ * Returns the new cache length.
+ */
+static int scalar_kv_cache_update(backend_t *backend, tensor_t *key_cache,
+                                  tensor_t *value_cache,
+                                  const tensor_t *new_keys,
+                                  const tensor_t *new_values, int cache_len) {
+  (void)backend;
+
+  if (!key_cache || !value_cache || !new_keys || !new_values)
+    return cache_len;
+
+  int num_tokens = (int)tensor_dim(new_keys, 0);
+  int kv_dim = (int)tensor_dim(new_keys, 1);
+
+  float *k_cache = tensor_data_f32(key_cache);
+  float *v_cache = tensor_data_f32(value_cache);
+  const float *keys = tensor_data_f32_const(new_keys);
+  const float *values = tensor_data_f32_const(new_values);
+
+  /* Append new keys and values */
+  for (int t = 0; t < num_tokens; t++) {
+    int cache_offset = (cache_len + t) * kv_dim;
+    int input_offset = t * kv_dim;
+
+    memcpy(k_cache + cache_offset, keys + input_offset, kv_dim * sizeof(float));
+    memcpy(v_cache + cache_offset, values + input_offset,
+           kv_dim * sizeof(float));
+  }
+
+  return cache_len + num_tokens;
+}
+
 static const backend_ops_t scalar_ops = {
     .name = "scalar",
     .capability = CAP_SCALAR,
@@ -377,12 +624,12 @@ static const backend_ops_t scalar_ops = {
     .gelu_tanh = scalar_gelu_tanh,
     .rms_norm = scalar_rms_norm,
     .layer_norm = scalar_layer_norm,
-    .rope = NULL,
-    .attention = NULL,
+    .rope = scalar_rope,
+    .attention = scalar_attention,
     .softmax = scalar_softmax,
     .sample = scalar_sample,
     .embedding_lookup = scalar_embedding_lookup,
-    .kv_cache_update = NULL,
+    .kv_cache_update = scalar_kv_cache_update,
 };
 
 const backend_ops_t *scalar_backend_ops(void) { return &scalar_ops; }
