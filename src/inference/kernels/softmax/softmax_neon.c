@@ -2,6 +2,7 @@
  * Softmax - NEON Optimized + Multi-threaded Implementations with Thread Pool
  */
 
+#include "inference/backend/caps.h"
 #include "inference/kernels/softmax/softmax_kernels.h"
 #include <math.h>
 #include <pthread.h>
@@ -181,9 +182,7 @@ int softmax_get_num_threads(void) {
 
 softmax_caps_t softmax_get_capabilities(void) {
   softmax_caps_t caps = {0};
-#if HAS_NEON
-  caps.has_neon = true;
-#endif
+  caps.has_neon = caps_has(CAP_NEON);
   return caps;
 }
 

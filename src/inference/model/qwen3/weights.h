@@ -1,7 +1,9 @@
 #ifndef QWEN3_WEIGHTS_H
 #define QWEN3_WEIGHTS_H
 
-#include "config.h"
+#include "inference/core/dtype.h"
+#include "inference/core/tensor.h"
+#include "inference/model/config.h"
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -10,36 +12,60 @@
 extern "C" {
 #endif
 
-typedef enum {
-  QWEN3_DTYPE_F32 = 0,
-  QWEN3_DTYPE_F16 = 1,
-} qwen3_dtype_t;
-
+/**
+ * Per-layer weights for Qwen3 transformer.
+ * Uses tensor_t for proper dtype tracking and memory management.
+ */
 typedef struct {
-  void *q_proj;
-  void *k_proj;
-  void *v_proj;
-  void *o_proj;
-  void *q_norm;
-  void *k_norm;
-  void *gate_proj;
-  void *up_proj;
-  void *down_proj;
-  void *attn_norm;
-  void *ffn_norm;
+  /* Attention projections */
+  tensor_t *q_proj;
+  tensor_t *k_proj;
+  tensor_t *v_proj;
+  tensor_t *o_proj;
+
+  /* QK normalization weights (Qwen3-specific) */
+  tensor_t *q_norm;
+  tensor_t *k_norm;
+
+  /* FFN projections */
+  tensor_t *gate_proj;
+  tensor_t *up_proj;
+  tensor_t *down_proj;
+
+  /* Layer normalization weights */
+  tensor_t *input_norm;     /* Pre-attention norm */
+  tensor_t *post_attn_norm; /* Pre-FFN norm */
 } qwen3_layer_weights_t;
 
+/**
+ * Full model weights for Qwen3.
+ */
 typedef struct {
-  void *embed_tokens;
-  void *norm;
-  void *lm_head;
-  qwen3_layer_weights_t *layers;
+  tensor_t *embed_tokens; /* Token embeddings [vocab_size, hidden_size] */
+  tensor_t *final_norm;   /* Final layer norm [hidden_size] */
+  tensor_t *lm_head;      /* Language model head [vocab_size, hidden_size] */
+
+  qwen3_layer_weights_t *layers; /* Per-layer weights */
   int num_layers;
-  qwen3_dtype_t dtype;
+
+  dtype_t dtype; /* Inference dtype */
 } qwen3_weights_t;
 
-bool qwen3_weights_load(qwen3_weights_t *weights, const qwen3_config_t *config,
-                        const char *model_path, qwen3_dtype_t dtype);
+/**
+ * Load model weights from safetensors file.
+ *
+ * @param weights Output weights structure
+ * @param config Model configuration
+ * @param model_path Path to model.safetensors
+ * @param dtype Target dtype for inference (F32 or F16)
+ * @return true on success, false on failure
+ */
+bool qwen3_weights_load(qwen3_weights_t *weights, const model_config_t *config,
+                        const char *model_path, dtype_t dtype);
+
+/**
+ * Free all weights and tensors.
+ */
 void qwen3_weights_free(qwen3_weights_t *weights);
 
 #ifdef __cplusplus

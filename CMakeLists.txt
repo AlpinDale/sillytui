@@ -64,6 +64,19 @@ set(SOURCES
     src/core/time.c
     src/core/error.c
     src/core/log.c
+    src/inference/core/dtype.c
+    src/inference/core/tensor.c
+    src/inference/core/error.c
+    src/inference/backend/caps.c
+    src/inference/backend/registry.c
+    src/inference/backend/cpu/scalar/scalar_backend.c
+    src/inference/backend/cpu/neon/neon_backend.c
+    src/inference/backend/cpu/amx/amx_backend.c
+    src/inference/backend/accelerate/accelerate_backend.c
+    src/inference/model/config.c
+    src/inference/model/common/ffn.c
+    src/inference/model/common/attention.c
+    src/inference/model/common/transformer.c
     src/ui/ui.c
     src/ui/modal.c
     src/ui/markdown.c
@@ -109,11 +122,8 @@ set(SOURCES
     src/inference/kernels/kv_cache/kv_cache.c
     src/inference/kernels/kv_cache/kv_cache_neon.c
     src/inference/model/base.c
-    src/inference/model/qwen3/config.c
+    src/inference/model/registry.c
     src/inference/model/qwen3/weights.c
-    src/inference/model/qwen3/ffn.c
-    src/inference/model/qwen3/attention_layer.c
-    src/inference/model/qwen3/transformer_layer.c
     src/inference/model/qwen3/qwen3.c
 )
 
@@ -203,6 +213,7 @@ set(TEST_SOURCES
     src/inference/kernels/sampling/sampling_neon.c
     src/inference/kernels/kv_cache/kv_cache.c
     src/inference/kernels/kv_cache/kv_cache_neon.c
+    src/inference/backend/caps.c
     src/ui/modal.c
     src/ui/ui.c
     src/ui/markdown.c
@@ -373,6 +384,7 @@ set(ALL_TEST_SOURCES
     src/inference/kernels/sampling/sampling_neon.c
     src/inference/kernels/kv_cache/kv_cache.c
     src/inference/kernels/kv_cache/kv_cache_neon.c
+    src/inference/backend/caps.c
     src/ui/modal.c
     src/ui/ui.c
     src/ui/markdown.c
@@ -442,18 +454,22 @@ target_compile_options(load_model PRIVATE
     -Wno-error
 )
 
-add_executable(qwen3_inference 
+add_executable(qwen3_inference
     examples/qwen3_inference.c
+    src/inference/core/dtype.c
+    src/inference/core/tensor.c
     src/inference/model/base.c
-    src/inference/model/qwen3/config.c
+    src/inference/model/registry.c
+    src/inference/model/config.c
+    src/inference/model/common/ffn.c
+    src/inference/model/common/attention.c
+    src/inference/model/common/transformer.c
     src/inference/model/qwen3/weights.c
-    src/inference/model/qwen3/ffn.c
-    src/inference/model/qwen3/attention_layer.c
-    src/inference/model/qwen3/transformer_layer.c
     src/inference/model/qwen3/qwen3.c
     src/inference/tokenizer/gpt2bpe.c
     src/inference/tokenizer/simd.c
     src/inference/tokenizer/unicode_tables.c
+    src/inference/backend/caps.c
     src/inference/kernels/gemm/gemm.c
     src/inference/kernels/gemm/gemm_neon.c
     src/inference/kernels/gemm/gemm_amx.c

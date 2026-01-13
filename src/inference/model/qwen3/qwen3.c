@@ -1,16 +1,55 @@
 #include "qwen3.h"
-#include "inference/kernels/embedding/embedding.h"
-#include "inference/kernels/gemm/gemm.h"
-#include "inference/kernels/norm/layernorm.h"
-#include "inference/kernels/rope/rope.h"
-#include "inference/kernels/sampling/sampling.h"
-#include "transformer_layer.h"
+#include "inference/core/dtype.h"
+#include "inference/model/common/transformer.h"
+#include "inference/ops/ops.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
+/**
+ * Build a transformer_layer_t from qwen3 layer weights.
+ * This adapts the qwen3-specific weight layout to the common interface.
+ */
+static void build_transformer_layer(transformer_layer_t *layer,
+                                    const qwen3_layer_weights_t *weights,
+                                    const model_config_t *config) {
+  /* Attention layer */
+  layer->attention.q_proj = weights->q_proj;
+  layer->attention.k_proj = weights->k_proj;
+  layer->attention.v_proj = weights->v_proj;
+  layer->attention.o_proj = weights->o_proj;
+  layer->attention.q_norm = weights->q_norm;
+  layer->attention.k_norm = weights->k_norm;
+  layer->attention.hidden_size = config->hidden_size;
+  layer->attention.num_heads = config->num_attention_heads;
+  layer->attention.num_kv_heads = config->num_key_value_heads;
+  layer->attention.head_dim = config->head_dim;
+  layer->attention.rope_theta = config->rope_theta;
+  layer->attention.max_position = config->max_position_embeddings;
+  layer->attention.has_qk_norm = true; /* Qwen3 always has QK norm */
+  layer->attention.has_bias = config->attention_bias;
+
+  /* FFN layer */
+  layer->ffn.gate_proj = weights->gate_proj;
+  layer->ffn.up_proj = weights->up_proj;
+  layer->ffn.down_proj = weights->down_proj;
+  layer->ffn.hidden_size = config->hidden_size;
+  layer->ffn.intermediate_size = config->intermediate_size;
+  layer->ffn.activation = config->hidden_act;
+  layer->ffn.has_bias = config->mlp_bias;
+  layer->ffn.gate_bias = NULL;
+  layer->ffn.up_bias = NULL;
+  layer->ffn.down_bias = NULL;
+
+  /* Norms */
+  layer->input_norm = weights->input_norm;
+  layer->post_attn_norm = weights->post_attn_norm;
+  layer->norm_type = config->norm_type;
+  layer->norm_eps = config->norm_eps;
+}
+
 bool qwen3_model_load(qwen3_model_t *model, const char *model_dir,
-                      qwen3_dtype_t dtype) {
+                      dtype_t dtype) {
   if (!model || !model_dir)
     return false;
 
@@ -19,7 +58,7 @@ bool qwen3_model_load(qwen3_model_t *model, const char *model_dir,
 
   char config_path[512];
   snprintf(config_path, sizeof(config_path), "%s/config.json", model_dir);
-  if (!qwen3_config_load(&model->config, config_path)) {
+  if (!model_config_load(&model->config, config_path)) {
     fprintf(stderr, "Failed to load config from %s\n", config_path);
     return false;
   }
@@ -28,7 +67,7 @@ bool qwen3_model_load(qwen3_model_t *model, const char *model_dir,
   snprintf(model_path, sizeof(model_path), "%s/model.safetensors", model_dir);
   if (!qwen3_weights_load(&model->weights, &model->config, model_path, dtype)) {
     fprintf(stderr, "Failed to load weights from %s\n", model_path);
-    qwen3_config_free(&model->config);
+    model_config_free(&model->config);
     return false;
   }
 
@@ -48,8 +87,7 @@ bool qwen3_model_load(qwen3_model_t *model, const char *model_dir,
 
   int kv_cache_size = model->max_seq_len * model->config.num_key_value_heads *
                       model->config.head_dim;
-  size_t elem_size =
-      (dtype == QWEN3_DTYPE_F16) ? sizeof(uint16_t) : sizeof(float);
+  size_t elem_size = dtype_size(dtype);
   for (int i = 0; i < model->config.num_hidden_layers; i++) {
     model->key_cache[i] = calloc(kv_cache_size, elem_size);
     model->value_cache[i] = calloc(kv_cache_size, elem_size);
@@ -61,7 +99,7 @@ bool qwen3_model_load(qwen3_model_t *model, const char *model_dir,
 
   int rot_dim = model->config.head_dim;
   int cache_size = model->max_seq_len * rot_dim * 2;
-  if (dtype == QWEN3_DTYPE_F16) {
+  if (dtype == DTYPE_F16) {
     float *cos_sin_f32 = (float *)malloc(cache_size * sizeof(float));
     if (!cos_sin_f32) {
       qwen3_model_free(model);
@@ -75,7 +113,7 @@ bool qwen3_model_load(qwen3_model_t *model, const char *model_dir,
       qwen3_model_free(model);
       return false;
     }
-    f32_array_to_f16(cos_sin_f32, (uint16_t *)model->cos_sin_cache, cache_size);
+    f32_to_f16_array(cos_sin_f32, (uint16_t *)model->cos_sin_cache, cache_size);
     free(cos_sin_f32);
   } else {
     model->cos_sin_cache = malloc(cache_size * sizeof(float));
@@ -102,7 +140,7 @@ void qwen3_model_free(qwen3_model_t *model) {
   if (!model)
     return;
 
-  qwen3_config_free(&model->config);
+  model_config_free(&model->config);
   qwen3_weights_free(&model->weights);
 
   if (model->key_cache) {
@@ -166,7 +204,7 @@ bool qwen3_forward(qwen3_model_t *model, float *logits, const int *token_ids,
     position_ids[i] = start_pos + i;
   }
 
-  if (model->dtype == QWEN3_DTYPE_F16) {
+  if (model->dtype == DTYPE_F16) {
     uint16_t *hidden = (uint16_t *)malloc(
         num_tokens * model->config.hidden_size * sizeof(uint16_t));
     if (!hidden) {
@@ -176,7 +214,7 @@ bool qwen3_forward(qwen3_model_t *model, float *logits, const int *token_ids,
     }
 
     embedding_lookup_f16(
-        hidden, token_ids_i64, (uint16_t *)model->weights.embed_tokens,
+        hidden, token_ids_i64, tensor_data_f16(model->weights.embed_tokens),
         num_tokens, model->config.vocab_size, model->config.hidden_size, -1);
     free(token_ids_i64);
 
@@ -191,12 +229,17 @@ bool qwen3_forward(qwen3_model_t *model, float *logits, const int *token_ids,
 
     for (int layer_idx = 0; layer_idx < model->config.num_hidden_layers;
          layer_idx++) {
-      qwen3_transformer_layer_f16(
-          layer_output, layer_input, &model->weights.layers[layer_idx],
+      /* Build transformer layer from weights */
+      transformer_layer_t layer;
+      build_transformer_layer(&layer, &model->weights.layers[layer_idx],
+                              &model->config);
+
+      transformer_layer_forward_f16(
+          layer_output, layer_input, &layer,
           (uint16_t *)model->key_cache[layer_idx],
           (uint16_t *)model->value_cache[layer_idx], position_ids,
-          (uint16_t *)model->cos_sin_cache, &model->config, num_tokens,
-          model->cache_len[layer_idx], layer_idx);
+          (uint16_t *)model->cos_sin_cache, num_tokens,
+          model->cache_len[layer_idx], model->config.hidden_size);
 
       model->cache_len[layer_idx] += num_tokens;
 
@@ -211,9 +254,9 @@ bool qwen3_forward(qwen3_model_t *model, float *logits, const int *token_ids,
       free(layer_output);
     }
 
-    rms_norm_f16(final_hidden, final_hidden, (uint16_t *)model->weights.norm,
-                 model->config.rms_norm_eps, num_tokens,
-                 model->config.hidden_size);
+    rms_norm_f16(final_hidden, final_hidden,
+                 tensor_data_f16(model->weights.final_norm),
+                 model->config.norm_eps, num_tokens, model->config.hidden_size);
 
     uint16_t *all_logits_f16 = (uint16_t *)malloc(
         num_tokens * model->config.vocab_size * sizeof(uint16_t));
@@ -226,12 +269,13 @@ bool qwen3_forward(qwen3_model_t *model, float *logits, const int *token_ids,
       return false;
     }
 
-    gemm_f16(final_hidden, (uint16_t *)model->weights.lm_head, all_logits_f16,
-             num_tokens, model->config.vocab_size, model->config.hidden_size);
+    gemm_f16(final_hidden, tensor_data_f16(model->weights.lm_head),
+             all_logits_f16, num_tokens, model->config.vocab_size,
+             model->config.hidden_size);
 
     uint16_t *last_token_logits_f16 =
         all_logits_f16 + (num_tokens - 1) * model->config.vocab_size;
-    f16_array_to_f32(last_token_logits_f16, logits, model->config.vocab_size);
+    f16_to_f32_array(last_token_logits_f16, logits, model->config.vocab_size);
 
     free(all_logits_f16);
     free(hidden);
@@ -250,8 +294,8 @@ bool qwen3_forward(qwen3_model_t *model, float *logits, const int *token_ids,
     }
 
     embedding_lookup_f32(
-        hidden, token_ids_i64, (float *)model->weights.embed_tokens, num_tokens,
-        model->config.vocab_size, model->config.hidden_size, -1);
+        hidden, token_ids_i64, tensor_data_f32(model->weights.embed_tokens),
+        num_tokens, model->config.vocab_size, model->config.hidden_size, -1);
     free(token_ids_i64);
 
     float *layer_input = hidden;
@@ -265,12 +309,17 @@ bool qwen3_forward(qwen3_model_t *model, float *logits, const int *token_ids,
 
     for (int layer_idx = 0; layer_idx < model->config.num_hidden_layers;
          layer_idx++) {
-      qwen3_transformer_layer_f32(
-          layer_output, layer_input, &model->weights.layers[layer_idx],
-          (float *)model->key_cache[layer_idx],
-          (float *)model->value_cache[layer_idx], position_ids,
-          (float *)model->cos_sin_cache, &model->config, num_tokens,
-          model->cache_len[layer_idx], layer_idx);
+      /* Build transformer layer from weights */
+      transformer_layer_t layer;
+      build_transformer_layer(&layer, &model->weights.layers[layer_idx],
+                              &model->config);
+
+      transformer_layer_forward_f32(layer_output, layer_input, &layer,
+                                    (float *)model->key_cache[layer_idx],
+                                    (float *)model->value_cache[layer_idx],
+                                    position_ids, (float *)model->cos_sin_cache,
+                                    num_tokens, model->cache_len[layer_idx],
+                                    model->config.hidden_size);
 
       model->cache_len[layer_idx] += num_tokens;
 
@@ -285,9 +334,9 @@ bool qwen3_forward(qwen3_model_t *model, float *logits, const int *token_ids,
       free(layer_output);
     }
 
-    rms_norm_f32(final_hidden, final_hidden, (float *)model->weights.norm,
-                 model->config.rms_norm_eps, num_tokens,
-                 model->config.hidden_size);
+    rms_norm_f32(final_hidden, final_hidden,
+                 tensor_data_f32(model->weights.final_norm),
+                 model->config.norm_eps, num_tokens, model->config.hidden_size);
 
     float *all_logits =
         (float *)malloc(num_tokens * model->config.vocab_size * sizeof(float));
@@ -300,7 +349,7 @@ bool qwen3_forward(qwen3_model_t *model, float *logits, const int *token_ids,
       return false;
     }
 
-    gemm_f32((float *)model->weights.lm_head, final_hidden, all_logits,
+    gemm_f32(tensor_data_f32(model->weights.lm_head), final_hidden, all_logits,
              model->config.vocab_size, num_tokens, model->config.hidden_size,
              false, true);
 

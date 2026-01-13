@@ -1,3 +1,4 @@
+#include "inference/backend/caps.h"
 #include "inference/kernels/gemm/gemm_kernels.h"
 #include <stdlib.h>
 #include <string.h>
@@ -86,12 +87,10 @@ static inline float fp16_to_float_c(uint16_t fp16) {
 
 gemm_caps_t gemm_get_capabilities(void) {
   gemm_caps_t caps = {0};
-#if HAS_NEON
-  caps.has_neon = true;
-#endif
-#if defined(__APPLE__) && defined(__aarch64__)
-  caps.has_amx = true;
-#endif
+  caps.has_neon = caps_has(CAP_NEON);
+  caps.has_amx = caps_has(CAP_AMX);
+  caps.has_avx2 = caps_has(CAP_AVX2);
+  caps.has_avx512 = caps_has(CAP_AVX512);
   return caps;
 }
 
