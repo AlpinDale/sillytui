@@ -1,11 +1,3 @@
-/**
- * @file ops/ops.h
- * @brief Convenience header that includes all operation interfaces.
- *
- * Model implementations should include this header instead of directly
- * including kernel headers. This provides a clean abstraction layer.
- */
-
 #ifndef INFERENCE_OPS_OPS_H
 #define INFERENCE_OPS_OPS_H
 

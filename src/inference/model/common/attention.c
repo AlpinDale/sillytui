@@ -1,8 +1,9 @@
 #include "attention.h"
-#include "inference/kernels/gemm/gemm.h"
-#include "inference/kernels/kv_cache/kv_cache.h"
-#include "inference/kernels/norm/layernorm.h"
-#include "inference/kernels/rope/rope.h"
+#include "inference/core/dtype.h"
+#include "inference/ops/gemm.h"
+#include "inference/ops/kv_cache.h"
+#include "inference/ops/norm.h"
+#include "inference/ops/rope.h"
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
@@ -133,61 +134,6 @@ void attention_forward_f32(float *output, const float *input,
   free(attn_out);
 }
 
-static inline float fp16_to_float(uint16_t fp16) {
-  uint32_t sign = (fp16 & 0x8000) << 16;
-  uint32_t exp = (fp16 >> 10) & 0x1F;
-  uint32_t mant = fp16 & 0x3FF;
-
-  uint32_t f32_bits;
-  if (exp == 0) {
-    if (mant == 0) {
-      f32_bits = sign;
-    } else {
-      int e = -14;
-      while ((mant & 0x400) == 0) {
-        mant <<= 1;
-        e--;
-      }
-      mant &= 0x3FF;
-      f32_bits = sign | (((uint32_t)(e + 127)) << 23) | (mant << 13);
-    }
-  } else if (exp == 31) {
-    f32_bits = sign | 0x7F800000 | (mant << 13);
-  } else {
-    f32_bits = sign | (((uint32_t)(exp - 15 + 127)) << 23) | (mant << 13);
-  }
-
-  float result;
-  memcpy(&result, &f32_bits, sizeof(float));
-  return result;
-}
-
-static inline uint16_t float_to_fp16(float x) {
-  uint32_t bits;
-  memcpy(&bits, &x, sizeof(float));
-  uint32_t sign = bits & 0x80000000;
-  uint32_t exp = (bits >> 23) & 0xFF;
-  uint32_t mant = bits & 0x7FFFFF;
-
-  if (exp == 0xFF) {
-    if (mant != 0)
-      return 0x7E00;
-    return (uint16_t)((sign >> 16) | 0x7C00);
-  }
-  if (exp == 0 && mant == 0)
-    return (uint16_t)(sign >> 16);
-
-  int32_t new_exp = (int32_t)exp - 127 + 15;
-  if (new_exp <= 0)
-    return (uint16_t)(sign >> 16);
-  if (new_exp >= 31)
-    return (uint16_t)((sign >> 16) | 0x7C00);
-
-  uint16_t fp16_exp = (uint16_t)(new_exp << 10);
-  uint16_t fp16_mant = (uint16_t)(mant >> 13);
-  return (uint16_t)((sign >> 16) | fp16_exp | fp16_mant);
-}
-
 #if HAS_NEON
 static inline float dot_product_f16_neon(const uint16_t *a, const uint16_t *b,
                                          int n) {
@@ -207,7 +153,7 @@ static inline float dot_product_f16_neon(const uint16_t *a, const uint16_t *b,
   float32x4_t sum = vaddq_f32(sum0, sum1);
   float result = vaddvq_f32(sum);
   for (; i < n; i++) {
-    result += fp16_to_float(a[i]) * fp16_to_float(b[i]);
+    result += f16_to_f32(a[i]) * f16_to_f32(b[i]);
   }
   return result;
 }
@@ -229,7 +175,7 @@ static inline void scale_accumulate_f16_neon(float *out, const uint16_t *v,
     vst1q_f32(&out[i + 4], out_hi);
   }
   for (; i < n; i++) {
-    out[i] = out[i] * alpha + fp16_to_float(v[i]) * weight;
+    out[i] = out[i] * alpha + f16_to_f32(v[i]) * weight;
   }
 }
 
@@ -245,7 +191,7 @@ static inline void f32_to_f16_neon(uint16_t *out, const float *in, float scale,
     vst1q_f16((float16_t *)&out[i], out_f16);
   }
   for (; i < n; i++) {
-    out[i] = float_to_fp16(in[i] * scale);
+    out[i] = f32_to_f16(in[i] * scale);
   }
 }
 #endif
@@ -342,7 +288,7 @@ void attention_forward_f16(uint16_t *output, const uint16_t *input,
 #else
         float score = 0.0f;
         for (int d = 0; d < head_dim; d++) {
-          score += fp16_to_float(q_head[d]) * fp16_to_float(k_pos[d]);
+          score += f16_to_f32(q_head[d]) * f16_to_f32(k_pos[d]);
         }
         score *= scale;
 #endif
@@ -356,7 +302,7 @@ void attention_forward_f16(uint16_t *output, const uint16_t *input,
 #else
         for (int d = 0; d < head_dim; d++) {
           out_f32_buf[d] =
-              out_f32_buf[d] * alpha + fp16_to_float(v_pos[d]) * weight;
+              out_f32_buf[d] * alpha + f16_to_f32(v_pos[d]) * weight;
         }
 #endif
         sum = sum * alpha + weight;
@@ -368,7 +314,7 @@ void attention_forward_f16(uint16_t *output, const uint16_t *input,
         f32_to_f16_neon(out_head, out_f32_buf, 1.0f / sum, head_dim);
 #else
         for (int d = 0; d < head_dim; d++) {
-          out_head[d] = float_to_fp16(out_f32_buf[d] / sum);
+          out_head[d] = f32_to_f16(out_f32_buf[d] / sum);
         }
 #endif
       }

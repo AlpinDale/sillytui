@@ -1,6 +1,6 @@
 #include "transformer.h"
 #include "inference/core/dtype.h"
-#include "inference/kernels/norm/layernorm.h"
+#include "inference/ops/norm.h"
 #include <stdlib.h>
 #include <string.h>
 

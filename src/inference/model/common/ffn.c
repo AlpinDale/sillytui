@@ -1,6 +1,6 @@
 #include "ffn.h"
-#include "inference/kernels/activation/activation.h"
-#include "inference/kernels/gemm/gemm.h"
+#include "inference/ops/activation.h"
+#include "inference/ops/gemm.h"
 #include <stdlib.h>
 #include <string.h>
 
