@@ -44,6 +44,8 @@ typedef struct {
   tensor_t *embed_tokens; /* Token embeddings [vocab_size, hidden_size] */
   tensor_t *final_norm;   /* Final layer norm [hidden_size] */
   tensor_t *lm_head;      /* Language model head [vocab_size, hidden_size] */
+  tensor_t *lm_head_f32;  /* F32 version for fast single-token decode (F16 only)
+                           */
 
   qwen3_layer_weights_t *layers; /* Per-layer weights */
   int num_layers;

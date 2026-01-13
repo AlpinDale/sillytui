@@ -253,6 +253,29 @@ bool qwen3_weights_load(qwen3_weights_t *weights, const model_config_t *config,
     }
   }
 
+  /* Pre-convert LM head to F32 for fast single-token decode.
+   * The LM head GEMM (1×vocab×hidden) is memory-bound and cblas_sgemv
+   * is much faster than BNNS F16 for this shape. Pre-converting saves
+   * the ~11ms conversion overhead on every forward pass. */
+  weights->lm_head_f32 = NULL;
+  if (dtype == DTYPE_F16 && weights->lm_head) {
+    size_t num_elements = (size_t)vocab * hidden;
+    float *lm_head_f32_data = (float *)malloc(num_elements * sizeof(float));
+    if (lm_head_f32_data) {
+      f16_to_f32_array(tensor_data_f16(weights->lm_head), lm_head_f32_data,
+                       num_elements);
+      int64_t shape[2] = {vocab, hidden};
+      weights->lm_head_f32 = tensor_create(DTYPE_F32, 2, shape);
+      if (weights->lm_head_f32) {
+        free(weights->lm_head_f32->data);
+        weights->lm_head_f32->data = lm_head_f32_data;
+        weights->lm_head_f32->owns_data = true;
+      } else {
+        free(lm_head_f32_data);
+      }
+    }
+  }
+
   weights->num_layers = config->num_hidden_layers;
   weights->layers = (qwen3_layer_weights_t *)calloc(
       config->num_hidden_layers, sizeof(qwen3_layer_weights_t));
@@ -288,6 +311,9 @@ void qwen3_weights_free(qwen3_weights_t *weights) {
     /* Just free the tensor_t struct, not the data */
     free(weights->lm_head);
   }
+
+  /* Free the F32 version of LM head */
+  tensor_free(weights->lm_head_f32);
 
   if (weights->layers) {
     for (int i = 0; i < weights->num_layers; i++) {

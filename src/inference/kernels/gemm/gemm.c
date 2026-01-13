@@ -305,6 +305,38 @@ void gemm_f16(const uint16_t *A, const uint16_t *B, uint16_t *C, int M, int N,
 
   gemm_caps_t caps = gemm_get_capabilities();
 
+#ifdef HAS_ACCELERATE
+  /*
+   * Fast path for single-row GEMM (M=1, common in decode phase).
+   * BNNS F16 MatMul is very slow for M=1 (~75ms for vocab projection).
+   * Convert to F32 and use cblas_sgemv which is 6-8× faster.
+   */
+  if (M == 1 && N > 32000) { /* Only for vocab-scale (LM head) */
+    float *A_f32 = (float *)malloc(K * sizeof(float));
+    float *B_f32 = (float *)malloc((size_t)K * N * sizeof(float));
+    float *C_f32 = (float *)malloc(N * sizeof(float));
+    if (A_f32 && B_f32 && C_f32) {
+      f16_array_to_f32(A, A_f32, K);
+      f16_array_to_f32(B, B_f32, (size_t)K * N);
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+      /* B is K×N row-major, we want C = A × B = (1×K) × (K×N) = 1×N */
+      cblas_sgemv(CblasRowMajor, CblasTrans, K, N, 1.0f, B_f32, N, A_f32, 1,
+                  0.0f, C_f32, 1);
+#pragma clang diagnostic pop
+      f32_array_to_f16(C_f32, C, N);
+      free(A_f32);
+      free(B_f32);
+      free(C_f32);
+      return;
+    }
+    free(A_f32);
+    free(B_f32);
+    free(C_f32);
+    /* Fall through to other paths if allocation failed */
+  }
+#endif
+
   if (caps.has_amx && M >= 32 && N >= 32) {
     int nt = gemm_get_num_threads();
     long long flops = (long long)M * N * K * 2;
